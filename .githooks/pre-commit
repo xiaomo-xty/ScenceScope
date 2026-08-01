@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+printf '%s\n' "[pre-commit] Checking formatting..."
+cargo fmt --all -- --check
+
+printf '%s\n' "[pre-commit] Running strict release Clippy..."
+# define in .cargo/config.toml
+cargo release-check
+
+printf '%s\n' "[pre-commit] Running tests..."
+cargo test --workspace --all-features
+
+printf '%s\n' "[pre-commit] All checks passed."

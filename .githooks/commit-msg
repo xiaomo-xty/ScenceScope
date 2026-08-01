@@ -1,0 +1,32 @@
+#!/bin/sh
+
+# When a commit message is created
+# it would be written to a temporary file and passed to this hook as the first argument.
+# commit-msg <提交信息文件路径>
+
+set -eu
+
+message_file=$1
+subject="$(git stripspace --strip-comments < "$message_file" | sed -n '1p')"
+
+case "$subject" in
+    Merge\ *|Revert\ \"*|fixup!\ *|squash!\ *|amend!\ *)
+        exit 0
+        ;;
+esac
+
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9][a-z0-9._/-]*\))?!?: .+$'
+
+if printf '%s\n' "$subject" | grep -Eq "$pattern"; then
+    exit 0
+fi
+
+printf '%s\n' "Invalid commit message subject:" >&2
+printf '  %s\n\n' "$subject" >&2
+printf '%s\n' "Expected: <type>(optional-scope): <description>" >&2
+printf '%s\n' "Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert" >&2
+printf '%s\n' "Examples:" >&2
+printf '%s\n' "  feat(desktop): create the application window" >&2
+printf '%s\n' "  fix(core): reject a truncated GLB header" >&2
+printf '%s\n' "  docs: clarify the M0 acceptance criteria" >&2
+exit 1
