@@ -1,0 +1,2 @@
+[alias]
+release-check = "clippy --workspace --all-targets --all-features --release -- -D warnings"
