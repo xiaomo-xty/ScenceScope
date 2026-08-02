@@ -130,4 +130,19 @@ impl GpuState {
 
         Ok(())
     }
+
+    /// resize the GPU state and reconfigure the surface
+    pub(super) fn resize(&mut self, size: PhysicalSize<u32>) {
+        self.size = size;
+
+        // `wgpu::Surface::configure()` don't allow zero width or height,
+        // so we should skip the configuration if the size is zero.
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+
+        self.config.width = size.width;
+        self.config.height = size.height;
+        self.surface.configure(&self.device, &self.config);
+    }
 }

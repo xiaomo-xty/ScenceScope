@@ -52,6 +52,20 @@ impl ApplicationHandler for App {
                 // do something to redraw the window
                 window.request_redraw();
             }
+            WindowEvent::Resized(size) => {
+                // if size.width == 0 || size.height == 0 {
+                //     // Ignore zero-sized windows, as they cannot be rendered to.
+                //     return;
+                // }
+
+                if let Some(gpu) = self.gpu.as_mut() {
+                    gpu.resize(size);
+
+                    if size.width > 0 && size.height > 0 {
+                        window.request_redraw();
+                    }
+                }
+            }
             _ => {}
         }
     }
