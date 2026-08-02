@@ -12,5 +12,6 @@ workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
+pollster = "1.0.1"
 wgpu = "30.0.0"
 winit = "0.30.13"
