@@ -3,7 +3,10 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Ok};
-use wgpu::RequestAdapterOptions;
+use wgpu::{
+    PipelineCompilationOptions, PipelineLayoutDescriptor, RenderPipelineDescriptor,
+    RequestAdapterOptions, ShaderModuleDescriptor, VertexState,
+};
 use winit::{dpi::PhysicalSize, window::Window};
 
 #[derive(Debug)]
@@ -14,6 +17,10 @@ pub(crate) struct GpuState {
     pub size: PhysicalSize<u32>,
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
+
+    render_pipeline: wgpu::RenderPipeline,
+    // vertex_buffer: wgpu::Buffer,
+    // _vertex_count: u32,
 }
 
 impl GpuState {
@@ -54,13 +61,58 @@ impl GpuState {
 
         surface.configure(&device, &config);
 
+        let shader_model = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("SceneScope shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("./shaders/hello.wgsl").into()),
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("pipeline layout"),
+            bind_group_layouts: &[
+                // no need now
+            ],
+            immediate_size: 0,
+        });
+
+        let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: Some("ScenceScope render pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: VertexState {
+                module: &shader_model,
+                entry_point: Some("vs_main"),
+                compilation_options: PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                ..Default::default()
+            },
+
+            fragment: Some(wgpu::FragmentState {
+                module: &shader_model,
+                entry_point: Some("fs_main"),
+                compilation_options: PipelineCompilationOptions::default(),
+                targets: &[Some(config.format.into())],
+            }),
+
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Ok(Self {
             device,
             queue,
-            // adapter,
             size,
             surface,
             config,
+            render_pipeline,
         })
     }
 
@@ -100,7 +152,7 @@ impl GpuState {
                 });
 
             {
-                let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("SceneScope clear render pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &view,
@@ -118,6 +170,9 @@ impl GpuState {
                     })],
                     ..Default::default()
                 });
+
+                render_pass.set_pipeline(&self.render_pipeline);
+                render_pass.draw(0..3, 0..1);
             }
             self.queue.submit([encoder.finish()]);
         }
