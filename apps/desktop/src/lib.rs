@@ -16,6 +16,12 @@ use crate::gpu::GpuState;
 
 pub mod gpu;
 
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "Vertex types are crate-visible to the sibling GPU module while this module remains private."
+)]
+mod vertex;
+
 #[derive(Default)]
 struct App {
     window: Option<Arc<Window>>,

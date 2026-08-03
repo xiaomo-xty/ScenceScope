@@ -5,9 +5,11 @@ use std::sync::Arc;
 use anyhow::{Context, Ok};
 use wgpu::{
     PipelineCompilationOptions, PipelineLayoutDescriptor, RenderPipelineDescriptor,
-    RequestAdapterOptions, ShaderModuleDescriptor, VertexState,
+    RequestAdapterOptions, ShaderModuleDescriptor, VertexState, util::DeviceExt,
 };
 use winit::{dpi::PhysicalSize, window::Window};
+
+use crate::vertex::{TRIANGLE_VERTICES, Vertex};
 
 #[derive(Debug)]
 pub(crate) struct GpuState {
@@ -19,8 +21,9 @@ pub(crate) struct GpuState {
     pub config: wgpu::SurfaceConfiguration,
 
     render_pipeline: wgpu::RenderPipeline,
-    // vertex_buffer: wgpu::Buffer,
-    // _vertex_count: u32,
+
+    vertex_buffer: wgpu::Buffer,
+    vertex_count: u32,
 }
 
 impl GpuState {
@@ -66,6 +69,15 @@ impl GpuState {
             source: wgpu::ShaderSource::Wgsl(include_str!("./shaders/hello.wgsl").into()),
         });
 
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("SceneScope triangle vertex buffer"),
+            contents: bytemuck::cast_slice(&TRIANGLE_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let vertex_count =
+            u32::try_from(TRIANGLE_VERTICES.len()).context("triangle vertex count exceeds u32")?;
+
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("pipeline layout"),
             bind_group_layouts: &[
@@ -81,7 +93,7 @@ impl GpuState {
                 module: &shader_model,
                 entry_point: Some("vs_main"),
                 compilation_options: PipelineCompilationOptions::default(),
-                buffers: &[],
+                buffers: &[Some(Vertex::layout())],
             },
 
             primitive: wgpu::PrimitiveState {
@@ -113,6 +125,9 @@ impl GpuState {
             surface,
             config,
             render_pipeline,
+
+            vertex_buffer,
+            vertex_count,
         })
     }
 
@@ -172,7 +187,14 @@ impl GpuState {
                 });
 
                 render_pass.set_pipeline(&self.render_pipeline);
-                render_pass.draw(0..3, 0..1);
+
+                render_pass.set_vertex_buffer(
+                    // the slot response to  buffers of VertexState in `render_pipeline`
+                    0,
+                    self.vertex_buffer.slice(..),
+                );
+
+                render_pass.draw(0..self.vertex_count, 0..1);
             }
             self.queue.submit([encoder.finish()]);
         }
