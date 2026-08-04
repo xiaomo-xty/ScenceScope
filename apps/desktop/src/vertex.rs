@@ -36,3 +36,28 @@ pub(crate) const TRIANGLE_VERTICES: [Vertex; 3] = [
         color: [0.0, 0.0, 1.0],
     },
 ];
+
+pub(crate) const QUAD_VERTICES: [Vertex; 4] = [
+    // 左上角
+    Vertex {
+        position: [-0.5, 0.5, 0.0],
+        color: [1.0, 0.0, 0.0], // 红
+    },
+    // 左下角
+    Vertex {
+        position: [-0.5, -0.5, 0.0],
+        color: [0.0, 1.0, 0.0], // 绿
+    },
+    // 右下角
+    Vertex {
+        position: [0.5, -0.5, 0.0],
+        color: [0.0, 0.0, 1.0], // 蓝
+    },
+    // 右上角
+    Vertex {
+        position: [0.5, 0.5, 0.0],
+        color: [1.0, 1.0, 0.0], // 黄（原来是重复的蓝色，这里换成黄色方便区分）
+    },
+];
+
+pub(crate) const QUAD_INDICES: [u16; 6] = [0, 1, 2, 0, 2, 3];

@@ -9,7 +9,7 @@ use wgpu::{
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
-use crate::vertex::{TRIANGLE_VERTICES, Vertex};
+use crate::vertex::{QUAD_INDICES, QUAD_VERTICES, TRIANGLE_VERTICES, Vertex};
 
 #[derive(Debug)]
 pub(crate) struct GpuState {
@@ -24,6 +24,9 @@ pub(crate) struct GpuState {
 
     vertex_buffer: wgpu::Buffer,
     vertex_count: u32,
+
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
 }
 
 impl GpuState {
@@ -70,13 +73,21 @@ impl GpuState {
         });
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("SceneScope triangle vertex buffer"),
-            contents: bytemuck::cast_slice(&TRIANGLE_VERTICES),
+            label: Some("SceneScope vertex buffer"),
+            contents: bytemuck::cast_slice(&QUAD_VERTICES),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("SceneScope index buffer"),
+            contents: bytemuck::cast_slice(&QUAD_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
         let vertex_count =
-            u32::try_from(TRIANGLE_VERTICES.len()).context("triangle vertex count exceeds u32")?;
+            u32::try_from(QUAD_VERTICES.len()).context("triangle vertex count exceeds u32")?;
+        let index_count =
+            u32::try_from(QUAD_INDICES.len()).context("triangle vertex count exceeds u32")?;
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("pipeline layout"),
@@ -128,6 +139,8 @@ impl GpuState {
 
             vertex_buffer,
             vertex_count,
+            index_buffer,
+            index_count,
         })
     }
 
@@ -194,7 +207,12 @@ impl GpuState {
                     self.vertex_buffer.slice(..),
                 );
 
-                render_pass.draw(0..self.vertex_count, 0..1);
+                render_pass
+                    .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+
+                // render_pass.draw(0..self.vertex_count,  0..1);
+
+                render_pass.draw_indexed(0..self.index_count, 0, 0..1);
             }
             self.queue.submit([encoder.finish()]);
         }
