@@ -22,21 +22,6 @@ impl Vertex {
     }
 }
 
-pub(crate) const TRIANGLE_VERTICES: [Vertex; 3] = [
-    Vertex {
-        position: [0.0, 0.5, 0.0],
-        color: [1.0, 0.0, 0.0],
-    },
-    Vertex {
-        position: [-0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0],
-    },
-    Vertex {
-        position: [0.5, -0.5, 0.0],
-        color: [0.0, 0.0, 1.0],
-    },
-];
-
 pub(crate) const QUAD_VERTICES: [Vertex; 4] = [
     // 左上角
     Vertex {

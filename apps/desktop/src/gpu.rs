@@ -9,7 +9,7 @@ use wgpu::{
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
-use crate::vertex::{QUAD_INDICES, QUAD_VERTICES, TRIANGLE_VERTICES, Vertex};
+use crate::vertex::{QUAD_INDICES, QUAD_VERTICES, Vertex};
 
 #[derive(Debug)]
 pub(crate) struct GpuState {
@@ -23,8 +23,7 @@ pub(crate) struct GpuState {
     render_pipeline: wgpu::RenderPipeline,
 
     vertex_buffer: wgpu::Buffer,
-    vertex_count: u32,
-
+    // vertex_count: u32,
     index_buffer: wgpu::Buffer,
     index_count: u32,
 }
@@ -84,8 +83,8 @@ impl GpuState {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let vertex_count =
-            u32::try_from(QUAD_VERTICES.len()).context("triangle vertex count exceeds u32")?;
+        // let vertex_count =
+        //     u32::try_from(QUAD_VERTICES.len()).context("triangle vertex count exceeds u32")?;
         let index_count =
             u32::try_from(QUAD_INDICES.len()).context("triangle vertex count exceeds u32")?;
 
@@ -138,7 +137,7 @@ impl GpuState {
             render_pipeline,
 
             vertex_buffer,
-            vertex_count,
+            // vertex_count,
             index_buffer,
             index_count,
         })
