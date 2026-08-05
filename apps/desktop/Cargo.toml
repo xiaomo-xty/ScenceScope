@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 anyhow = "1.0.104"
 bytemuck = { version = "1.25.2", features = ["derive"] }
+glam = "0.33.3"
 pollster = "1.0.1"
 scenescope-core = { version = "0.1.0", path = "../../crates/scenescope-core" }
 scenescope-gltf = { version = "0.1.0", path = "../../crates/scenescope-gltf" }

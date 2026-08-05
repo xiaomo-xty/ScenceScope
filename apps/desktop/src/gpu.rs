@@ -3,6 +3,10 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Ok};
+use glam::{
+    Vec3,
+    camera::rh::{proj::directx::perspective, view::look_at_mat4},
+};
 use scenescope_core::MeshData;
 use wgpu::{
     PipelineCompilationOptions, PipelineLayoutDescriptor, RenderPipelineDescriptor,
@@ -11,6 +15,77 @@ use wgpu::{
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::vertex::Vertex;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CameraUniform {
+    view_projection: [[f32; 4]; 4],
+}
+
+impl CameraUniform {
+    fn new(aspect_ratio: f32) -> Self {
+        let view = look_at_mat4(Vec3::new(1.5, 1.5, 2.5), Vec3::ZERO, Vec3::Y);
+
+        let projection = perspective(45.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
+
+        Self {
+            view_projection: (projection * view).to_cols_array_2d(),
+        }
+    }
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "window dimensions only need approximate precision for aspect ratio"
+)]
+const fn aspect_ratio(size: PhysicalSize<u32>) -> f32 {
+    size.width as f32 / size.height as f32
+}
+
+fn create_render_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    surface_format: wgpu::TextureFormat,
+    camera_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("pipeline layout"),
+        bind_group_layouts: &[Some(camera_layout)],
+        immediate_size: 0,
+    });
+
+    device.create_render_pipeline(&RenderPipelineDescriptor {
+        label: Some("ScenceScope render pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: PipelineCompilationOptions::default(),
+            buffers: &[Some(Vertex::layout())],
+        },
+
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            ..Default::default()
+        },
+
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: PipelineCompilationOptions::default(),
+            targets: &[Some(surface_format.into())],
+        }),
+
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
 
 #[derive(Debug)]
 pub(crate) struct GpuState {
@@ -27,11 +102,18 @@ pub(crate) struct GpuState {
     // vertex_count: u32,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
 }
 
 impl GpuState {
     pub(super) async fn new(window: Arc<Window>, mesh: &MeshData) -> anyhow::Result<Self> {
         let size = window.inner_size();
+
+        if size.width == 0 || size.height == 0 {
+            anyhow::bail!("Window size is zero, cannot create GPU state");
+        }
 
         let instance = wgpu::Instance::default();
 
@@ -61,10 +143,6 @@ impl GpuState {
             .get_default_config(&adapter, size.width, size.height)
             .context("Selected adapter cannot present to the surface")?;
 
-        if size.width == 0 || size.height == 0 {
-            anyhow::bail!("Window size is zero, cannot create GPU state");
-        }
-
         surface.configure(&device, &config);
 
         let shader_model = device.create_shader_module(ShaderModuleDescriptor {
@@ -91,50 +169,49 @@ impl GpuState {
             usage: wgpu::BufferUsages::INDEX,
         });
 
+        let camera_uniform = CameraUniform::new(aspect_ratio(size));
+
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("SceneScope camera uniform buffer"),
+            contents: bytemuck::bytes_of(&camera_uniform),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("SceneScope camera bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("SceneScope camera bind group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+
         // let vertex_count =
         //     u32::try_from(QUAD_VERTICES.len()).context("triangle vertex count exceeds u32")?;
         let index_count =
             u32::try_from(mesh.indices.len()).context("triangle vertex count exceeds u32")?;
 
-        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("pipeline layout"),
-            bind_group_layouts: &[
-                // no need now
-            ],
-            immediate_size: 0,
-        });
-
-        let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("ScenceScope render pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader_model,
-                entry_point: Some("vs_main"),
-                compilation_options: PipelineCompilationOptions::default(),
-                buffers: &[Some(Vertex::layout())],
-            },
-
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                ..Default::default()
-            },
-
-            fragment: Some(wgpu::FragmentState {
-                module: &shader_model,
-                entry_point: Some("fs_main"),
-                compilation_options: PipelineCompilationOptions::default(),
-                targets: &[Some(config.format.into())],
-            }),
-
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let render_pipeline = create_render_pipeline(
+            &device,
+            &shader_model,
+            config.format,
+            &camera_bind_group_layout,
+        );
 
         Ok(Self {
             device,
@@ -148,6 +225,9 @@ impl GpuState {
             // vertex_count,
             index_buffer,
             index_count,
+
+            camera_buffer,
+            camera_bind_group,
         })
     }
 
@@ -208,6 +288,8 @@ impl GpuState {
 
                 render_pass.set_pipeline(&self.render_pipeline);
 
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+
                 render_pass.set_vertex_buffer(
                     // the slot response to  buffers of VertexState in `render_pipeline`
                     0,
@@ -242,6 +324,11 @@ impl GpuState {
         if size.width == 0 || size.height == 0 {
             return;
         }
+
+        let camera_uniform = CameraUniform::new(aspect_ratio(size));
+
+        self.queue
+            .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
 
         self.config.width = size.width;
         self.config.height = size.height;
