@@ -1,0 +1,15 @@
+[package]
+name = "scenescope-gltf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+gltf = { version = "1.4.1", default-features = false, features = ["utils"] }
+scenescope-core = { version = "0.1.0", path = "../scenescope-core" }
+thiserror = "2.0.19"
+
+[lints]
+workspace = true
