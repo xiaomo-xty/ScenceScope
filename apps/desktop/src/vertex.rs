@@ -7,11 +7,20 @@ pub(crate) struct Vertex {
     color: [f32; 3],
 }
 
+const DEBUG_COLOR: [f32; 3] = [0.25, 0.70, 1.0];
+
 impl Vertex {
     const ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![
         0 => Float32x3,
         1 => Float32x3,
     ];
+
+    pub(crate) const fn from_position(position: [f32; 3]) -> Self {
+        Self {
+            position,
+            color: DEBUG_COLOR,
+        }
+    }
 
     pub(crate) const fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -21,28 +30,3 @@ impl Vertex {
         }
     }
 }
-
-pub(crate) const QUAD_VERTICES: [Vertex; 4] = [
-    // 左上角
-    Vertex {
-        position: [-0.5, 0.5, 0.0],
-        color: [1.0, 0.0, 0.0], // 红
-    },
-    // 左下角
-    Vertex {
-        position: [-0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0], // 绿
-    },
-    // 右下角
-    Vertex {
-        position: [0.5, -0.5, 0.0],
-        color: [0.0, 0.0, 1.0], // 蓝
-    },
-    // 右上角
-    Vertex {
-        position: [0.5, 0.5, 0.0],
-        color: [1.0, 1.0, 0.0], // 黄（原来是重复的蓝色，这里换成黄色方便区分）
-    },
-];
-
-pub(crate) const QUAD_INDICES: [u16; 6] = [0, 1, 2, 0, 2, 3];

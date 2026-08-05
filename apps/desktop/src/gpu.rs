@@ -3,13 +3,14 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Ok};
+use scenescope_core::MeshData;
 use wgpu::{
     PipelineCompilationOptions, PipelineLayoutDescriptor, RenderPipelineDescriptor,
     RequestAdapterOptions, ShaderModuleDescriptor, VertexState, util::DeviceExt,
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
-use crate::vertex::{QUAD_INDICES, QUAD_VERTICES, Vertex};
+use crate::vertex::Vertex;
 
 #[derive(Debug)]
 pub(crate) struct GpuState {
@@ -29,7 +30,7 @@ pub(crate) struct GpuState {
 }
 
 impl GpuState {
-    pub(super) async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+    pub(super) async fn new(window: Arc<Window>, mesh: &MeshData) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::default();
@@ -71,22 +72,29 @@ impl GpuState {
             source: wgpu::ShaderSource::Wgsl(include_str!("./shaders/hello.wgsl").into()),
         });
 
+        let vertices: Vec<Vertex> = mesh
+            .positions
+            .iter()
+            .copied()
+            .map(Vertex::from_position)
+            .collect();
+
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("SceneScope vertex buffer"),
-            contents: bytemuck::cast_slice(&QUAD_VERTICES),
+            contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("SceneScope index buffer"),
-            contents: bytemuck::cast_slice(&QUAD_INDICES),
+            contents: bytemuck::cast_slice(&mesh.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
 
         // let vertex_count =
         //     u32::try_from(QUAD_VERTICES.len()).context("triangle vertex count exceeds u32")?;
         let index_count =
-            u32::try_from(QUAD_INDICES.len()).context("triangle vertex count exceeds u32")?;
+            u32::try_from(mesh.indices.len()).context("triangle vertex count exceeds u32")?;
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("pipeline layout"),

@@ -1524,6 +1524,8 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "pollster",
+ "scenescope-core",
+ "scenescope-gltf",
  "wgpu",
  "winit",
 ]
