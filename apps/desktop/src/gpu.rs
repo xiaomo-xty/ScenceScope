@@ -215,7 +215,7 @@ impl GpuState {
                 );
 
                 render_pass
-                    .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
                 // render_pass.draw(0..self.vertex_count,  0..1);
 
