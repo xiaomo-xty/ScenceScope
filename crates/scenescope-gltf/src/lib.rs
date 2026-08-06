@@ -93,7 +93,13 @@ pub fn parse_first_mesh_primitive(bytes: &[u8]) -> Result<MeshData, ParseError> 
         .into_u32()
         .collect();
 
-    Ok(MeshData { positions, indices })
+    let normals = reader.read_normals().map(Iterator::collect);
+
+    Ok(MeshData {
+        positions,
+        indices,
+        normals,
+    })
 }
 
 #[cfg(test)]
@@ -109,7 +115,7 @@ mod tests {
         assert_eq!(
             mesh.positions.len(),
             24,
-            "Box.glb should contain 24 vetex positions"
+            "Box.glb should contain 24 vertex positions"
         );
 
         assert_eq!(
@@ -125,6 +131,12 @@ mod tests {
                 .iter()
                 .all(|&index| { usize::try_from(index).is_ok_and(|index| index < position_count) }),
             "every index should reference an existing vertex position",
+        );
+
+        assert_eq!(
+            mesh.normals.as_ref().map(Vec::len),
+            Some(mesh.positions.len()),
+            "Box.glb should provide one normal per vertex position"
         );
 
         Ok(())

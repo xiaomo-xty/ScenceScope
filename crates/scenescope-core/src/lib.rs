@@ -14,4 +14,7 @@ pub struct MeshData {
 
     /// Triangle vertex indices normalized to `u32`.
     pub indices: Vec<u32>,
+
+    /// Vertex normals supplied by the source asset.
+    pub normals: Option<Vec<[f32; 3]>>,
 }
