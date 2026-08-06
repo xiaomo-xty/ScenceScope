@@ -42,6 +42,29 @@ const fn aspect_ratio(size: PhysicalSize<u32>) -> f32 {
     size.width as f32 / size.height as f32
 }
 
+fn vertices_from_mesh(mesh: &MeshData) -> anyhow::Result<Vec<Vertex>> {
+    let Some(normals) = mesh.normals.as_deref() else {
+        return Ok(mesh
+            .positions
+            .iter()
+            .copied()
+            .map(Vertex::from_position)
+            .collect());
+    };
+
+    if mesh.positions.len() != normals.len() {
+        anyhow::bail!("mesh position and normal counts do not match");
+    }
+
+    Ok(mesh
+        .positions
+        .iter()
+        .copied()
+        .zip(normals.iter().copied())
+        .map(|(position, normal)| Vertex::from_position_and_normal(position, normal))
+        .collect())
+}
+
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
 fn create_depth_view(device: &wgpu::Device, size: PhysicalSize<u32>) -> wgpu::TextureView {
@@ -179,12 +202,7 @@ impl GpuState {
             source: wgpu::ShaderSource::Wgsl(include_str!("./shaders/hello.wgsl").into()),
         });
 
-        let vertices: Vec<Vertex> = mesh
-            .positions
-            .iter()
-            .copied()
-            .map(Vertex::from_position)
-            .collect();
+        let vertices: Vec<Vertex> = vertices_from_mesh(mesh)?;
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("SceneScope vertex buffer"),

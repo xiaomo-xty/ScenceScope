@@ -5,19 +5,26 @@
 pub(crate) struct Vertex {
     position: [f32; 3],
     color: [f32; 3],
+    normal: [f32; 3],
 }
 
 const DEBUG_COLOR: [f32; 3] = [0.25, 0.70, 1.0];
 
 impl Vertex {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![
+    const ATTRIBUTES: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
         0 => Float32x3,
         1 => Float32x3,
+        2 => Float32x3,
     ];
 
     pub(crate) const fn from_position(position: [f32; 3]) -> Self {
+        Self::from_position_and_normal(position, [0.0; 3])
+    }
+
+    pub(crate) const fn from_position_and_normal(position: [f32; 3], normal: [f32; 3]) -> Self {
         Self {
             position,
+            normal,
             color: DEBUG_COLOR,
         }
     }
