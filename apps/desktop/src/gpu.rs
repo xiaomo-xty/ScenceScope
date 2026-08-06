@@ -42,6 +42,27 @@ const fn aspect_ratio(size: PhysicalSize<u32>) -> f32 {
     size.width as f32 / size.height as f32
 }
 
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+
+fn create_depth_view(device: &wgpu::Device, size: PhysicalSize<u32>) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("SceneScope depth texture"),
+        size: wgpu::Extent3d {
+            width: size.width,
+            height: size.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
 fn create_render_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
@@ -80,7 +101,13 @@ fn create_render_pipeline(
             targets: &[Some(surface_format.into())],
         }),
 
-        depth_stencil: None,
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,
@@ -105,6 +132,8 @@ pub(crate) struct GpuState {
 
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+
+    depth_view: wgpu::TextureView,
 }
 
 impl GpuState {
@@ -213,6 +242,8 @@ impl GpuState {
             &camera_bind_group_layout,
         );
 
+        let depth_view = create_depth_view(&device, size);
+
         Ok(Self {
             device,
             queue,
@@ -228,6 +259,8 @@ impl GpuState {
 
             camera_buffer,
             camera_bind_group,
+
+            depth_view,
         })
     }
 
@@ -283,6 +316,15 @@ impl GpuState {
                             store: wgpu::StoreOp::Store,
                         },
                     })],
+
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
                     ..Default::default()
                 });
 
@@ -333,5 +375,7 @@ impl GpuState {
         self.config.width = size.width;
         self.config.height = size.height;
         self.surface.configure(&self.device, &self.config);
+
+        self.depth_view = create_depth_view(&self.device, size);
     }
 }
