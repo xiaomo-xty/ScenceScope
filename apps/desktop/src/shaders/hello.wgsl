@@ -37,10 +37,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     if normal_length_squared > 0.0 {
         let normal = normalize(input.normal);
-        let light_direction = normalize(vec3<f32>(0.5, 1.0, 0.8));
-        let diffuse = max(dot(normal, light_direction), 0.0);
+        let direction_to_light =
+            normalize(vec3<f32>(0.5, 1.0, 0.8));
 
-        light_factor = 0.2 + 0.8 * diffuse;
+        let diffuse_factor =
+            max(dot(normal, direction_to_light), 0.0);
+
+        let ambient_intensity: f32 = 0.2;
+        let diffuse_intensity: f32 = 0.8;
+
+        light_factor =
+            ambient_intensity
+            + diffuse_intensity * diffuse_factor;
     }
 
     return vec4<f32>(input.color * light_factor, 1.0);
