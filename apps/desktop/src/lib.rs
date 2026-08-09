@@ -6,22 +6,13 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use scenescope_core::MeshInstance;
+use scenescope_render::GpuState;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::{self, ControlFlow, EventLoop},
     window::Window,
 };
-
-use crate::gpu::GpuState;
-
-pub mod gpu;
-
-#[allow(
-    clippy::redundant_pub_crate,
-    reason = "Vertex types are crate-visible to the sibling GPU module while this module remains private."
-)]
-mod vertex;
 
 // #[derive(Default)]
 struct App {

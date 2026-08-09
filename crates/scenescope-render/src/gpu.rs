@@ -200,14 +200,15 @@ fn create_object_binding(
     Ok((layout, bind_group))
 }
 
+/// Owns the GPU resources used to render one mesh instance to a window surface
 #[derive(Debug)]
-pub(crate) struct GpuState {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
+pub struct GpuState {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
     // pub adapter: wgpu::Adapter,
-    pub size: PhysicalSize<u32>,
-    pub surface: wgpu::Surface<'static>,
-    pub config: wgpu::SurfaceConfiguration,
+    size: PhysicalSize<u32>,
+    surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
 
     render_pipeline: wgpu::RenderPipeline,
 
@@ -226,10 +227,21 @@ pub(crate) struct GpuState {
 }
 
 impl GpuState {
-    pub(super) async fn new(
-        window: Arc<Window>,
-        mesh_instance: &MeshInstance,
-    ) -> anyhow::Result<Self> {
+    /// Creates GPU resources for a window and mesh instance.
+    ///
+    /// The window must have non-zero physical dimensions. Mesh geometry and
+    /// the world transform are uploaded during initialization.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// - the window cannot be used to create a rendering surface;
+    /// - no compatible GPU adapter or device is available;
+    /// - position and normal counts do not match.
+    /// - the mesh world transform is not invertible.
+    /// - the index count cannot be represented as `u32`.
+    pub async fn new(window: Arc<Window>, mesh_instance: &MeshInstance) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
         if size.width == 0 || size.height == 0 {
@@ -360,7 +372,15 @@ impl GpuState {
         })
     }
 
-    pub(super) fn render(&self) -> anyhow::Result<()> {
+    /// Renders and presents one frame.
+    ///
+    /// Rendering is skipped while window has zero area or while the surface
+    /// is temporarily unavailable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the GPU surface is lost or reports a validation error.
+    pub fn render(&self) -> anyhow::Result<()> {
         if self.size.width == 0 || self.size.height == 0 {
             // Skip rendering if the window size is zero
             return Ok(());
@@ -454,8 +474,11 @@ impl GpuState {
         Ok(())
     }
 
-    /// resize the GPU state and reconfigure the surface
-    pub(super) fn resize(&mut self, size: PhysicalSize<u32>) {
+    /// Updates the surface configuration and camera projection for a new size.
+    ///
+    /// A zero-sized window is recorded, but surface reconfiguration is deferred
+    /// until a non-zero size is received.
+    pub fn resize(&mut self, size: PhysicalSize<u32>) {
         self.size = size;
 
         // `wgpu::Surface::configure()` don't allow zero width or height,

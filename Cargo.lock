@@ -1528,12 +1528,10 @@ name = "scenescope-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bytemuck",
- "glam",
  "pollster",
  "scenescope-core",
  "scenescope-gltf",
- "wgpu",
+ "scenescope-render",
  "winit",
 ]
 
@@ -1545,6 +1543,18 @@ dependencies = [
  "gltf",
  "scenescope-core",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "scenescope-render"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "glam",
+ "scenescope-core",
+ "wgpu",
+ "winit",
 ]
 
 [[package]]
