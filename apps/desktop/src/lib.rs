@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use scenescope_core::MeshData;
+use scenescope_core::MeshInstance;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -25,7 +25,7 @@ mod vertex;
 
 // #[derive(Default)]
 struct App {
-    mesh: MeshData,
+    mesh: MeshInstance,
     window: Option<Arc<Window>>,
     gpu: Option<GpuState>,
     fatal_error: Option<anyhow::Error>,
@@ -119,7 +119,7 @@ impl ApplicationHandler for App {
 }
 
 impl App {
-    const fn new(mesh: MeshData) -> Self {
+    const fn new(mesh: MeshInstance) -> Self {
         Self {
             mesh,
             window: None,

@@ -6,6 +6,16 @@
 //!
 //!
 
+/// A mesh placed in world space by a scene node.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeshInstance {
+    /// Shared geometry for this initial single-mesh representation.
+    pub mesh: MeshData,
+
+    /// Column-major transform from local space to world space.
+    pub world_transform: [[f32; 4]; 4],
+}
+
 /// CPU-side geometry extracted from an asset.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeshData {

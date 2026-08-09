@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Ok};
 use glam::{
-    Vec3,
+    Mat4, Vec3,
     camera::rh::{proj::directx::perspective, view::look_at_mat4},
 };
-use scenescope_core::MeshData;
+use scenescope_core::{MeshData, MeshInstance};
 use wgpu::{
     PipelineCompilationOptions, PipelineLayoutDescriptor, RenderPipelineDescriptor,
     RequestAdapterOptions, ShaderModuleDescriptor, VertexState, util::DeviceExt,
@@ -31,6 +31,29 @@ impl CameraUniform {
         Self {
             view_projection: (projection * view).to_cols_array_2d(),
         }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ObjectUniform {
+    model: [[f32; 4]; 4],
+    normal_matrix: [[f32; 4]; 4],
+}
+
+impl ObjectUniform {
+    fn new(world_transform: &[[f32; 4]; 4]) -> anyhow::Result<Self> {
+        let model = Mat4::from_cols_array_2d(world_transform);
+
+        let normal_matrix = model
+            .try_inverse()
+            .context("mesh world transform is not invertiable")?
+            .transpose();
+
+        Ok(Self {
+            model: model.to_cols_array_2d(),
+            normal_matrix: normal_matrix.to_cols_array_2d(),
+        })
     }
 }
 
@@ -91,10 +114,11 @@ fn create_render_pipeline(
     shader: &wgpu::ShaderModule,
     surface_format: wgpu::TextureFormat,
     camera_layout: &wgpu::BindGroupLayout,
+    object_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
     let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
         label: Some("pipeline layout"),
-        bind_group_layouts: &[Some(camera_layout)],
+        bind_group_layouts: &[Some(camera_layout), Some(object_layout)],
         immediate_size: 0,
     });
 
@@ -137,6 +161,45 @@ fn create_render_pipeline(
     })
 }
 
+fn create_object_binding(
+    device: &wgpu::Device,
+    world_transform: &[[f32; 4]; 4],
+) -> anyhow::Result<(wgpu::BindGroupLayout, wgpu::BindGroup)> {
+    // =============================== obejct uniform ===========================================
+    let object_uniform = ObjectUniform::new(world_transform)?;
+
+    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("SceneScop object uniform buffer"),
+        contents: bytemuck::bytes_of(&object_uniform),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("SceneScope object bind group layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
+
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("SceneScope obejct bind group"),
+        layout: &layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: buffer.as_entire_binding(),
+        }],
+    });
+
+    Ok((layout, bind_group))
+}
+
 #[derive(Debug)]
 pub(crate) struct GpuState {
     pub device: wgpu::Device,
@@ -156,11 +219,17 @@ pub(crate) struct GpuState {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
 
+    // object_buffer: wgpu::Buffer,
+    object_bind_group: wgpu::BindGroup,
+
     depth_view: wgpu::TextureView,
 }
 
 impl GpuState {
-    pub(super) async fn new(window: Arc<Window>, mesh: &MeshData) -> anyhow::Result<Self> {
+    pub(super) async fn new(
+        window: Arc<Window>,
+        mesh_instance: &MeshInstance,
+    ) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
         if size.width == 0 || size.height == 0 {
@@ -202,7 +271,7 @@ impl GpuState {
             source: wgpu::ShaderSource::Wgsl(include_str!("./shaders/hello.wgsl").into()),
         });
 
-        let vertices: Vec<Vertex> = vertices_from_mesh(mesh)?;
+        let vertices: Vec<Vertex> = vertices_from_mesh(&mesh_instance.mesh)?;
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("SceneScope vertex buffer"),
@@ -212,9 +281,11 @@ impl GpuState {
 
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("SceneScope index buffer"),
-            contents: bytemuck::cast_slice(&mesh.indices),
+            contents: bytemuck::cast_slice(&mesh_instance.mesh.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
+
+        // ======================================== camera_unfiform ==================================
 
         let camera_uniform = CameraUniform::new(aspect_ratio(size));
 
@@ -248,16 +319,20 @@ impl GpuState {
             }],
         });
 
+        let (object_bind_group_layout, object_bind_group) =
+            create_object_binding(&device, &mesh_instance.world_transform)?;
+
         // let vertex_count =
         //     u32::try_from(QUAD_VERTICES.len()).context("triangle vertex count exceeds u32")?;
-        let index_count =
-            u32::try_from(mesh.indices.len()).context("triangle vertex count exceeds u32")?;
+        let index_count = u32::try_from(mesh_instance.mesh.indices.len())
+            .context("triangle vertex count exceeds u32")?;
 
         let render_pipeline = create_render_pipeline(
             &device,
             &shader_model,
             config.format,
             &camera_bind_group_layout,
+            &object_bind_group_layout,
         );
 
         let depth_view = create_depth_view(&device, size);
@@ -277,6 +352,9 @@ impl GpuState {
 
             camera_buffer,
             camera_bind_group,
+
+            // object_buffer,
+            object_bind_group,
 
             depth_view,
         })
@@ -349,6 +427,7 @@ impl GpuState {
                 render_pass.set_pipeline(&self.render_pipeline);
 
                 render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_bind_group(1, &self.object_bind_group, &[]);
 
                 render_pass.set_vertex_buffer(
                     // the slot response to  buffers of VertexState in `render_pipeline`
