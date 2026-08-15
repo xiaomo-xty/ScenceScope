@@ -458,6 +458,41 @@ impl GpuState {
 
         self.surface_state = SurfaceState::Configured;
     }
+
+    /// Rotates the orbit camera around its current target.
+    ///
+    /// `delta_yaw_radians` rotates the camera horizontally around
+    /// the world Y axis. A positive value moves the camera from the
+    /// positive Z direction toward the positive X direction.
+    ///
+    /// `delta_pitch_radians` rotates the camera vertically. A positive
+    /// value moves the camera above its target. The resulting pitch is
+    /// clamped to prevent the view direction from becoming parallel to
+    /// the camera's up vector.
+    ///
+    /// The updated view-projection matrix is written to the camera
+    /// uniform buffer immediately.
+    pub fn orbit_camera(&mut self, delta_yaw_radians: f32, delta_pitch_radians: f32) {
+        self.camera.orbit(delta_yaw_radians, delta_pitch_radians);
+
+        self.camera_binding
+            .update_uniform(&self.queue, &self.camera);
+    }
+
+    /// Changes the orbit camera's distance from its target.
+    ///
+    /// A positive `delta` moves the camera closer to the target, while
+    /// a negative value moves it farther away. The distance is clamped
+    /// to the camera's supported minimum and maximum values.
+    ///
+    /// The updated view-projection matrix is written to the camera
+    /// uniform buffer immediately.
+    pub fn zoom_camera(&mut self, delta: f32) {
+        self.camera.zoom(delta);
+
+        self.camera_binding
+            .update_uniform(&self.queue, &self.camera);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -7,6 +7,11 @@ use glam::{
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 
+const PITCH_LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
+
+const MIN_DISTANCE: f32 = 0.1;
+const MAX_DISTANCE: f32 = 100.0;
+
 #[derive(Debug)]
 pub(crate) struct OrbitCamera {
     /// the center of orbit, and the camera's eye point to it always.
@@ -62,21 +67,15 @@ impl OrbitCamera {
         self.aspect_ratio = aspect_ratio;
     }
 
-    // pub(crate) fn orbit(&mut self, delta_yaw: f32, delta_pitch: f32) {
-    //     self.yaw += delta_yaw;
+    pub(crate) fn orbit(&mut self, delta_yaw_radians: f32, delta_pitch_radians: f32) {
+        self.yaw += delta_yaw_radians;
 
-    //     const LIMIT: f32 =
-    //         std::f32::consts::FRAC_PI_2 - 0.01;
+        self.pitch = (self.pitch + delta_pitch_radians).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+    }
 
-    //     self.pitch =
-    //         (self.pitch + delta_pitch).clamp(-LIMIT, LIMIT);
-    // }
-
-    // pub(crate) fn zoom(&mut self, delta: f32) {
-    //     self.distance =
-    //         (self.distance * (-delta * 0.1).exp())
-    //             .clamp(0.1, 100.0);
-    // }
+    pub(crate) fn zoom(&mut self, delta: f32) {
+        self.distance = (self.distance * (-delta * 0.1).exp()).clamp(MIN_DISTANCE, MAX_DISTANCE);
+    }
 }
 
 #[repr(C)]
@@ -150,10 +149,6 @@ impl CameraBinding {
         &self.bind_group
     }
 
-    // pub(crate) const fn buffer(&self) -> &wgpu::Buffer {
-    //     &self.buffer
-    // }
-
     pub(crate) fn update_uniform(&self, queue: &wgpu::Queue, camera: &OrbitCamera) {
         let uniform = CameraUniform::from_camera(camera);
 
@@ -167,4 +162,79 @@ impl CameraBinding {
 )]
 pub(crate) const fn aspect_ratio(size: PhysicalSize<u32>) -> f32 {
     size.width as f32 / size.height as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::Vec3;
+
+    use super::{MAX_DISTANCE, MIN_DISTANCE, OrbitCamera, PITCH_LIMIT};
+
+    const EPSILON: f32 = 1.0e-5;
+
+    #[test]
+    fn new_reproduces_initial_eye_position() {
+        let camera = OrbitCamera::new(16.0 / 9.0);
+        let expected = Vec3::new(1.5, 1.5, 2.5);
+
+        assert!(
+            camera.eye().distance(expected) < EPSILON,
+            "initial orbit camera eye should match the original fixed camera",
+        );
+    }
+
+    #[test]
+    fn orbit_preserves_distance_from_target() {
+        let mut camera = OrbitCamera::new(16.0 / 9.0);
+
+        let initial_distance = camera.eye().distance(camera.target);
+
+        camera.orbit(0.7, 0.3);
+
+        let new_distance = camera.eye().distance(camera.target);
+
+        // keep the distance same
+        assert!(
+            (new_distance - initial_distance).abs() < EPSILON,
+            "orbiting should preserve the distance from the target",
+        );
+    }
+
+    #[test]
+    fn orbit_clamps_pitch() {
+        let mut camera = OrbitCamera::new(16.0 / 9.0);
+
+        camera.orbit(0.0, 100.0);
+
+        assert!(
+            (camera.pitch - PITCH_LIMIT).abs() < EPSILON,
+            "positive pitch should be clamped",
+        );
+
+        camera.orbit(0.0, -200.0);
+
+        assert!(
+            (camera.pitch + PITCH_LIMIT).abs() < EPSILON,
+            "negative pitch should be clamped",
+        );
+    }
+
+    #[test]
+    fn zoom_clamps_distance() {
+        let mut camera = OrbitCamera::new(16.0 / 9.0);
+
+        camera.zoom(1000.0);
+
+        assert!(
+            (camera.distance - MIN_DISTANCE).abs() < EPSILON,
+            "zooming in should respect the minimum distance",
+        );
+
+        camera.zoom(-1000.0);
+
+        assert!(
+            (camera.distance - MAX_DISTANCE).abs() < EPSILON,
+            "zooming out should respect the maximum distance",
+        );
+    }
 }
