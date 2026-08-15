@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "apps/desktop",
+    "apps/desktop", "apps/web",
     "crates/scenescope-core", "crates/scenescope-gltf", "crates/scenescope-render",
 ]
 resolver = "3"

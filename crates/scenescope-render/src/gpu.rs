@@ -112,7 +112,7 @@ fn create_depth_view(device: &wgpu::Device, size: PhysicalSize<u32>) -> wgpu::Te
 fn create_render_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
-    surface_format: wgpu::TextureFormat,
+    surface_view_format: wgpu::TextureFormat,
     camera_layout: &wgpu::BindGroupLayout,
     object_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
@@ -145,7 +145,7 @@ fn create_render_pipeline(
             module: shader,
             entry_point: Some("fs_main"),
             compilation_options: PipelineCompilationOptions::default(),
-            targets: &[Some(surface_format.into())],
+            targets: &[Some(surface_view_format.into())],
         }),
 
         depth_stencil: Some(wgpu::DepthStencilState {
@@ -206,9 +206,10 @@ pub struct GpuState {
     device: wgpu::Device,
     queue: wgpu::Queue,
     // pub adapter: wgpu::Adapter,
-    size: PhysicalSize<u32>,
+    surface_state: SurfaceState,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    surface_view_format: wgpu::TextureFormat,
 
     render_pipeline: wgpu::RenderPipeline,
 
@@ -217,13 +218,13 @@ pub struct GpuState {
     index_buffer: wgpu::Buffer,
     index_count: u32,
 
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
+    camera_binding: CameraBinding,
 
     // object_buffer: wgpu::Buffer,
     object_bind_group: wgpu::BindGroup,
 
     depth_view: wgpu::TextureView,
+    // config: wgpu::SurfaceConfiguration,
 }
 
 impl GpuState {
@@ -272,9 +273,11 @@ impl GpuState {
             .await
             .context("failed to request a compatible GPU device")?;
 
-        let config = surface
+        let mut config = surface
             .get_default_config(&adapter, size.width, size.height)
             .context("Selected adapter cannot present to the surface")?;
+
+        let surface_view_format = configure_srgb_surface_view(&mut config)?;
 
         surface.configure(&device, &config);
 
@@ -297,39 +300,7 @@ impl GpuState {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        // ======================================== camera_unfiform ==================================
-
-        let camera_uniform = CameraUniform::new(aspect_ratio(size));
-
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("SceneScope camera uniform buffer"),
-            contents: bytemuck::bytes_of(&camera_uniform),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("SceneScope camera bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("SceneScope camera bind group"),
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-        });
+        let camera_binding = CameraBinding::new(&device, size);
 
         let (object_bind_group_layout, object_bind_group) =
             create_object_binding(&device, &mesh_instance.world_transform)?;
@@ -342,19 +313,22 @@ impl GpuState {
         let render_pipeline = create_render_pipeline(
             &device,
             &shader_model,
-            config.format,
-            &camera_bind_group_layout,
+            surface_view_format,
+            &camera_binding.layout,
             &object_bind_group_layout,
         );
 
         let depth_view = create_depth_view(&device, size);
 
+        let surface_state = SurfaceState::Configured;
+
         Ok(Self {
             device,
             queue,
-            size,
+            surface_state,
             surface,
             config,
+            surface_view_format,
             render_pipeline,
 
             vertex_buffer,
@@ -362,8 +336,7 @@ impl GpuState {
             index_buffer,
             index_count,
 
-            camera_buffer,
-            camera_bind_group,
+            camera_binding,
 
             // object_buffer,
             object_bind_group,
@@ -380,10 +353,13 @@ impl GpuState {
     /// # Errors
     ///
     /// Returns an error if the GPU surface is lost or reports a validation error.
-    pub fn render(&self) -> anyhow::Result<()> {
-        if self.size.width == 0 || self.size.height == 0 {
-            // Skip rendering if the window size is zero
-            return Ok(());
+    pub fn render(&mut self) -> anyhow::Result<()> {
+        match self.surface_state {
+            SurfaceState::Suspended => return Ok(()),
+            SurfaceState::Configured => {}
+            SurfaceState::ResizePending(size) => {
+                self.reconfigure_surface(size);
+            }
         }
 
         let (surface_texture, should_reconfigure) = match self.surface.get_current_texture() {
@@ -407,7 +383,11 @@ impl GpuState {
         {
             let view = surface_texture
                 .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
+                .create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("SceneScope sRGB surface view"),
+                    format: Some(self.surface_view_format),
+                    ..wgpu::TextureViewDescriptor::default()
+                });
 
             let mut encoder = self
                 .device
@@ -446,7 +426,7 @@ impl GpuState {
 
                 render_pass.set_pipeline(&self.render_pipeline);
 
-                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_bind_group(0, &self.camera_binding.bind_group, &[]);
                 render_pass.set_bind_group(1, &self.object_bind_group, &[]);
 
                 render_pass.set_vertex_buffer(
@@ -478,24 +458,109 @@ impl GpuState {
     ///
     /// A zero-sized window is recorded, but surface reconfiguration is deferred
     /// until a non-zero size is received.
-    pub fn resize(&mut self, size: PhysicalSize<u32>) {
-        self.size = size;
-
-        // `wgpu::Surface::configure()` don't allow zero width or height,
-        // so we should skip the configuration if the size is zero.
+    pub const fn resize(&mut self, size: PhysicalSize<u32>) {
         if size.width == 0 || size.height == 0 {
-            return;
+            self.surface_state = SurfaceState::Suspended;
+        } else if size.width == self.config.width && size.height == self.config.height {
+            self.surface_state = SurfaceState::Configured;
+        } else {
+            self.surface_state = SurfaceState::ResizePending(size);
         }
+    }
 
+    fn reconfigure_surface(&mut self, size: PhysicalSize<u32>) {
         let camera_uniform = CameraUniform::new(aspect_ratio(size));
 
-        self.queue
-            .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
+        self.queue.write_buffer(
+            &self.camera_binding.buffer,
+            0,
+            bytemuck::bytes_of(&camera_uniform),
+        );
 
         self.config.width = size.width;
         self.config.height = size.height;
-        self.surface.configure(&self.device, &self.config);
 
+        self.surface.configure(&self.device, &self.config);
         self.depth_view = create_depth_view(&self.device, size);
+
+        self.surface_state = SurfaceState::Configured;
     }
+}
+
+#[derive(Debug)]
+struct CameraBinding {
+    buffer: wgpu::Buffer,
+    layout: wgpu::BindGroupLayout,
+    bind_group: wgpu::BindGroup,
+}
+
+impl CameraBinding {
+    fn new(device: &wgpu::Device, size: PhysicalSize<u32>) -> Self {
+        // ======================================== camera_uniform ==================================
+
+        let uniform = CameraUniform::new(aspect_ratio(size));
+
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("SceneScope camera uniform buffer"),
+            contents: bytemuck::bytes_of(&uniform),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("SceneScope camera bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("SceneScope camera bind group"),
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+
+        Self {
+            buffer,
+            layout,
+            bind_group,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SurfaceState {
+    Configured,
+    ResizePending(PhysicalSize<u32>),
+    Suspended,
+}
+
+fn configure_srgb_surface_view(
+    config: &mut wgpu::SurfaceConfiguration,
+) -> anyhow::Result<wgpu::TextureFormat> {
+    let view_format = config.format.add_srgb_suffix();
+
+    if !view_format.is_srgb() {
+        anyhow::bail!(
+            "surface format {:?} has no sRGB-compatible view format",
+            config.format,
+        );
+    }
+
+    config.color_space = wgpu::SurfaceColorSpace::Srgb;
+
+    if view_format != config.format {
+        config.view_formats.push(view_format);
+    }
+
+    Ok(view_format)
 }

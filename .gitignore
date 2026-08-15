@@ -1,4 +1,5 @@
 /target
+/apps/web/pkg/
 .idea/
 .vscode/
 *.log
