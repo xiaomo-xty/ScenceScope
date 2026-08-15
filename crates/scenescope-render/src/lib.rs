@@ -6,6 +6,12 @@
 
 mod gpu;
 
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "Camera types are shared with the sibling GPU module while the camera module remains private."
+)]
+mod camera;
+
 pub use gpu::GpuState;
 
 #[allow(

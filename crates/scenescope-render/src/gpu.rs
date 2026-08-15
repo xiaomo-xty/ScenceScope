@@ -3,10 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Ok};
-use glam::{
-    Mat4, Vec3,
-    camera::rh::{proj::directx::perspective, view::look_at_mat4},
-};
+use glam::Mat4;
 use scenescope_core::{MeshData, MeshInstance};
 use wgpu::{
     PipelineCompilationOptions, PipelineLayoutDescriptor, RenderPipelineDescriptor,
@@ -14,25 +11,10 @@ use wgpu::{
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
-use crate::vertex::Vertex;
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct CameraUniform {
-    view_projection: [[f32; 4]; 4],
-}
-
-impl CameraUniform {
-    fn new(aspect_ratio: f32) -> Self {
-        let view = look_at_mat4(Vec3::new(1.5, 1.5, 2.5), Vec3::ZERO, Vec3::Y);
-
-        let projection = perspective(45.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
-
-        Self {
-            view_projection: (projection * view).to_cols_array_2d(),
-        }
-    }
-}
+use crate::{
+    camera::{CameraBinding, CameraUniform, aspect_ratio},
+    vertex::Vertex,
+};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -55,14 +37,6 @@ impl ObjectUniform {
             normal_matrix: normal_matrix.to_cols_array_2d(),
         })
     }
-}
-
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "window dimensions only need approximate precision for aspect ratio"
-)]
-const fn aspect_ratio(size: PhysicalSize<u32>) -> f32 {
-    size.width as f32 / size.height as f32
 }
 
 fn vertices_from_mesh(mesh: &MeshData) -> anyhow::Result<Vec<Vertex>> {
@@ -314,7 +288,7 @@ impl GpuState {
             &device,
             &shader_model,
             surface_view_format,
-            &camera_binding.layout,
+            camera_binding.layout(),
             &object_bind_group_layout,
         );
 
@@ -426,7 +400,7 @@ impl GpuState {
 
                 render_pass.set_pipeline(&self.render_pipeline);
 
-                render_pass.set_bind_group(0, &self.camera_binding.bind_group, &[]);
+                render_pass.set_bind_group(0, self.camera_binding.bind_group(), &[]);
                 render_pass.set_bind_group(1, &self.object_bind_group, &[]);
 
                 render_pass.set_vertex_buffer(
@@ -472,7 +446,7 @@ impl GpuState {
         let camera_uniform = CameraUniform::new(aspect_ratio(size));
 
         self.queue.write_buffer(
-            &self.camera_binding.buffer,
+            self.camera_binding.buffer(),
             0,
             bytemuck::bytes_of(&camera_uniform),
         );
@@ -484,56 +458,6 @@ impl GpuState {
         self.depth_view = create_depth_view(&self.device, size);
 
         self.surface_state = SurfaceState::Configured;
-    }
-}
-
-#[derive(Debug)]
-struct CameraBinding {
-    buffer: wgpu::Buffer,
-    layout: wgpu::BindGroupLayout,
-    bind_group: wgpu::BindGroup,
-}
-
-impl CameraBinding {
-    fn new(device: &wgpu::Device, size: PhysicalSize<u32>) -> Self {
-        // ======================================== camera_uniform ==================================
-
-        let uniform = CameraUniform::new(aspect_ratio(size));
-
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("SceneScope camera uniform buffer"),
-            contents: bytemuck::bytes_of(&uniform),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("SceneScope camera bind group layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("SceneScope camera bind group"),
-            layout: &layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-        });
-
-        Self {
-            buffer,
-            layout,
-            bind_group,
-        }
     }
 }
 
