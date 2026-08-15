@@ -12,7 +12,7 @@ use wgpu::{
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{
-    camera::{CameraBinding, CameraUniform, aspect_ratio},
+    camera::{CameraBinding, OrbitCamera, aspect_ratio},
     vertex::Vertex,
 };
 
@@ -192,9 +192,9 @@ pub struct GpuState {
     index_buffer: wgpu::Buffer,
     index_count: u32,
 
+    camera: OrbitCamera,
     camera_binding: CameraBinding,
 
-    // object_buffer: wgpu::Buffer,
     object_bind_group: wgpu::BindGroup,
 
     depth_view: wgpu::TextureView,
@@ -274,7 +274,8 @@ impl GpuState {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let camera_binding = CameraBinding::new(&device, size);
+        let camera = OrbitCamera::new(aspect_ratio(size));
+        let camera_binding = CameraBinding::new(&device, &camera);
 
         let (object_bind_group_layout, object_bind_group) =
             create_object_binding(&device, &mesh_instance.world_transform)?;
@@ -310,6 +311,7 @@ impl GpuState {
             index_buffer,
             index_count,
 
+            camera,
             camera_binding,
 
             // object_buffer,
@@ -443,13 +445,10 @@ impl GpuState {
     }
 
     fn reconfigure_surface(&mut self, size: PhysicalSize<u32>) {
-        let camera_uniform = CameraUniform::new(aspect_ratio(size));
+        self.camera.set_aspect_ratio(aspect_ratio(size));
 
-        self.queue.write_buffer(
-            self.camera_binding.buffer(),
-            0,
-            bytemuck::bytes_of(&camera_uniform),
-        );
+        self.camera_binding
+            .update_uniform(&self.queue, &self.camera);
 
         self.config.width = size.width;
         self.config.height = size.height;

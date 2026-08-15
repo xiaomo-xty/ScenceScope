@@ -1,88 +1,94 @@
 //! Camera mode
 
 use glam::{
-    Vec3,
+    Mat4, Vec3,
     camera::rh::{proj::directx::perspective, view::look_at_mat4},
 };
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 
-// #[derive(Debug)]
-// pub(crate) struct OrbitCamera {
-//     /// the center of orbit, and the camera's eye point to it always.
-//     target: Vec3,
-//     yaw: f32,
-//     pitch: f32,
-//     distance: f32,
-//     aspect_ratio: f32,
-// }
+#[derive(Debug)]
+pub(crate) struct OrbitCamera {
+    /// the center of orbit, and the camera's eye point to it always.
+    target: Vec3,
+    yaw: f32,
+    pitch: f32,
+    distance: f32,
+    aspect_ratio: f32,
+}
 
-// impl OrbitCamera {
-//     pub(crate) fn eye(&self) -> Vec3 {
-//         let horizontal_distance =
-//             self.distance * self.pitch.cos();
+impl OrbitCamera {
+    pub(crate) fn new(aspect_ratio: f32) -> Self {
+        let target = Vec3::ZERO;
+        let initial_eye = Vec3::new(1.5, 1.5, 2.5);
+        let offset = initial_eye - target;
 
-//         let offset = Vec3::new(
-//             horizontal_distance * self.yaw.sin(),
-//             self.distance * self.pitch.sin(),
-//             horizontal_distance * self.yaw.cos(),
-//         );
+        let horizontal_distance = offset.x.hypot(offset.z);
 
-//         self.target + offset
-//     }
+        Self {
+            target,
+            yaw: offset.x.atan2(offset.z),
+            pitch: offset.y.atan2(horizontal_distance),
+            distance: offset.length(),
+            aspect_ratio,
+        }
+    }
 
-//     pub(crate) fn view(&self) -> Mat4 {
-//         look_at_mat4(
-//             self.eye(),
-//             self.target,
-//             Vec3::Y
-//         )
-//     }
+    pub(crate) fn eye(&self) -> Vec3 {
+        let horizontal_distance = self.distance * self.pitch.cos();
 
-//     pub(crate) fn projection(&self) -> Mat4 {
-//         perspective(
-//             45.0_f32.to_radians(),
-//             self.aspect_ratio,
-//             0.1,
-//             100.0,
-//         )
-//     }
+        let offset = Vec3::new(
+            horizontal_distance * self.yaw.sin(),
+            self.distance * self.pitch.sin(),
+            horizontal_distance * self.yaw.cos(),
+        );
 
-//     pub(crate) fn view_projection(&self) -> Mat4 {
-//         self.projection() * self.view()
-//     }
+        self.target + offset
+    }
 
-//     pub(crate) fn orbit(&mut self, delta_yaw: f32, delta_pitch: f32) {
-//         self.yaw += delta_yaw;
+    pub(crate) fn view(&self) -> Mat4 {
+        look_at_mat4(self.eye(), self.target, Vec3::Y)
+    }
 
-//         const LIMIT: f32 =
-//             std::f32::consts::FRAC_PI_2 - 0.01;
+    pub(crate) fn projection(&self) -> Mat4 {
+        perspective(45.0_f32.to_radians(), self.aspect_ratio, 0.1, 100.0)
+    }
 
-//         self.pitch =
-//             (self.pitch + delta_pitch).clamp(-LIMIT, LIMIT);
-//     }
+    pub(crate) fn view_projection(&self) -> Mat4 {
+        self.projection() * self.view()
+    }
 
-//     pub(crate) fn zoom(&mut self, delta: f32) {
-//         self.distance =
-//             (self.distance * (-delta * 0.1).exp())
-//                 .clamp(0.1, 100.0);
-//     }
-// }
+    pub(crate) const fn set_aspect_ratio(&mut self, aspect_ratio: f32) {
+        self.aspect_ratio = aspect_ratio;
+    }
+
+    // pub(crate) fn orbit(&mut self, delta_yaw: f32, delta_pitch: f32) {
+    //     self.yaw += delta_yaw;
+
+    //     const LIMIT: f32 =
+    //         std::f32::consts::FRAC_PI_2 - 0.01;
+
+    //     self.pitch =
+    //         (self.pitch + delta_pitch).clamp(-LIMIT, LIMIT);
+    // }
+
+    // pub(crate) fn zoom(&mut self, delta: f32) {
+    //     self.distance =
+    //         (self.distance * (-delta * 0.1).exp())
+    //             .clamp(0.1, 100.0);
+    // }
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct CameraUniform {
+struct CameraUniform {
     view_projection: [[f32; 4]; 4],
 }
 
 impl CameraUniform {
-    pub(crate) fn new(aspect_ratio: f32) -> Self {
-        let view = look_at_mat4(Vec3::new(1.5, 1.5, 2.5), Vec3::ZERO, Vec3::Y);
-
-        let projection = perspective(45.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
-
+    pub(crate) fn from_camera(camera: &OrbitCamera) -> Self {
         Self {
-            view_projection: (projection * view).to_cols_array_2d(),
+            view_projection: camera.view_projection().to_cols_array_2d(),
         }
     }
 }
@@ -95,10 +101,10 @@ pub(crate) struct CameraBinding {
 }
 
 impl CameraBinding {
-    pub(crate) fn new(device: &wgpu::Device, size: PhysicalSize<u32>) -> Self {
+    pub(crate) fn new(device: &wgpu::Device, camera: &OrbitCamera) -> Self {
         // ======================================== camera_uniform ==================================
 
-        let uniform = CameraUniform::new(aspect_ratio(size));
+        let uniform = CameraUniform::from_camera(camera);
 
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("SceneScope camera uniform buffer"),
@@ -144,17 +150,15 @@ impl CameraBinding {
         &self.bind_group
     }
 
-    pub(crate) const fn buffer(&self) -> &wgpu::Buffer {
-        &self.buffer
-    }
-
-    // pub(crate) fn update(
-    //     &self,
-    //     queue: &wgpu::Queue,
-    //     camera: &OrbitCamera,
-    // ) {
-    //     todo!();
+    // pub(crate) const fn buffer(&self) -> &wgpu::Buffer {
+    //     &self.buffer
     // }
+
+    pub(crate) fn update_uniform(&self, queue: &wgpu::Queue, camera: &OrbitCamera) {
+        let uniform = CameraUniform::from_camera(camera);
+
+        queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&uniform));
+    }
 }
 
 #[allow(
