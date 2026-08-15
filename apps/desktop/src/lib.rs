@@ -9,7 +9,8 @@ use scenescope_core::MeshInstance;
 use scenescope_render::GpuState;
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
+    dpi::PhysicalPosition,
+    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{self, ControlFlow, EventLoop},
     window::Window,
 };
@@ -19,6 +20,7 @@ struct App {
     mesh: MeshInstance,
     window: Option<Arc<Window>>,
     gpu: Option<GpuState>,
+    orbit_gesture: OrbitGesture,
     fatal_error: Option<anyhow::Error>,
 }
 
@@ -64,6 +66,20 @@ impl ApplicationHandler for App {
                         window.request_redraw();
                     }
                 }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.handle_mouse_input(state, button);
+            }
+
+            WindowEvent::CursorMoved { position, .. } => {
+                self.handle_cursor_moved(position, &window);
+            }
+
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.handle_mouse_wheel(delta, &window);
+            }
+            WindowEvent::Focused(false) | WindowEvent::CursorLeft { .. } => {
+                self.orbit_gesture = OrbitGesture::Inactive;
             }
             _ => {}
         }
@@ -115,6 +131,7 @@ impl App {
             mesh,
             window: None,
             gpu: None,
+            orbit_gesture: OrbitGesture::Inactive,
             fatal_error: None,
         }
     }
@@ -127,6 +144,55 @@ impl App {
             anyhow::bail!("GPU state is not initialized");
         };
         gpu.render()
+    }
+
+    fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) {
+        if button != MouseButton::Left {
+            return;
+        }
+
+        self.orbit_gesture = match state {
+            ElementState::Pressed => OrbitGesture::Armed,
+            ElementState::Released => OrbitGesture::Inactive,
+        }
+    }
+
+    fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>, window: &Window) {
+        let position = position.cast::<f32>();
+
+        match self.orbit_gesture {
+            OrbitGesture::Inactive => {}
+            OrbitGesture::Armed => {
+                self.orbit_gesture = OrbitGesture::Dragging { previous: position }
+            }
+            OrbitGesture::Dragging { previous } => {
+                let delta_x = position.x - previous.x;
+                let delta_y = position.y - previous.y;
+
+                self.orbit_gesture = OrbitGesture::Dragging { previous: position };
+
+                if let Some(gpu) = self.gpu.as_mut() {
+                    gpu.orbit_camera(
+                        -delta_x * YAW_RADIANS_PER_PIXEL,
+                        -delta_y * PITCH_RADIANS_PER_PIXEL,
+                    );
+
+                    window.request_redraw();
+                }
+            }
+        }
+    }
+
+    fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta, window: &Window) {
+        let zoom_delta = match delta {
+            MouseScrollDelta::LineDelta(_, y) => y,
+            MouseScrollDelta::PixelDelta(position) => position.cast::<f32>().y,
+        };
+
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.zoom_camera(zoom_delta);
+            window.request_redraw();
+        }
     }
 }
 
@@ -161,3 +227,16 @@ pub fn run() -> anyhow::Result<()> {
 // fn main() -> anyhow::Result<()> {
 //     run()
 // }
+
+// const ORBIT_RADIANS_PER_PIXEL: f32 = 0.005;
+
+const YAW_RADIANS_PER_PIXEL: f32 = 0.005;
+const PITCH_RADIANS_PER_PIXEL: f32 = -0.005;
+
+// const PIXELS_PER_SCROLL_LINE: f32 = 100.0;
+
+enum OrbitGesture {
+    Inactive,
+    Armed,
+    Dragging { previous: PhysicalPosition<f32> },
+}
