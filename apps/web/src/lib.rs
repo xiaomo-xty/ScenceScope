@@ -7,7 +7,8 @@ mod browser {
     use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
     use winit::{
         application::ApplicationHandler,
-        event::WindowEvent,
+        dpi::PhysicalPosition,
+        event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
         event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
         platform::web::{EventLoopExtWebSys, WindowAttributesExtWebSys},
         window::{Window, WindowId},
@@ -24,10 +25,20 @@ mod browser {
         Failed,
     }
 
+    const YAW_RADIANS_PER_PIXEL: f32 = 0.005;
+    const PITCH_RADIANS_PER_PIXEL: f32 = -0.005;
+
+    enum OrbitGesture {
+        Inactive,
+        Armed,
+        Dragging { previous: PhysicalPosition<f32> },
+    }
+
     struct App {
         window: Option<Arc<Window>>,
         proxy: EventLoopProxy<UserEvent>,
         renderer: RendererState,
+        orbit_gesture: OrbitGesture,
     }
 
     impl App {
@@ -36,6 +47,7 @@ mod browser {
                 proxy,
                 window: None,
                 renderer: RendererState::WaitingForSize,
+                orbit_gesture: OrbitGesture::Inactive,
             }
         }
 
@@ -66,6 +78,55 @@ mod browser {
                     web_sys::console::error_1(&js_error(&error));
                 }
             });
+        }
+
+        fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) {
+            if button != MouseButton::Left {
+                return;
+            }
+
+            self.orbit_gesture = match state {
+                ElementState::Pressed => OrbitGesture::Armed,
+                ElementState::Released => OrbitGesture::Inactive,
+            };
+        }
+
+        fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>, window: &Window) {
+            let position = position.cast::<f32>();
+
+            match self.orbit_gesture {
+                OrbitGesture::Inactive => {}
+                OrbitGesture::Armed => {
+                    self.orbit_gesture = OrbitGesture::Dragging { previous: position };
+                }
+                OrbitGesture::Dragging { previous } => {
+                    let delta_x = position.x - previous.x;
+                    let delta_y = position.y - previous.y;
+
+                    self.orbit_gesture = OrbitGesture::Dragging { previous: position };
+
+                    if let RendererState::Ready(gpu) = &mut self.renderer {
+                        gpu.orbit_camera(
+                            -delta_x * YAW_RADIANS_PER_PIXEL,
+                            -delta_y * PITCH_RADIANS_PER_PIXEL,
+                        );
+
+                        window.request_redraw();
+                    }
+                }
+            }
+        }
+
+        fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta, window: &Window) {
+            let zoom_delta = match delta {
+                MouseScrollDelta::LineDelta(_, y) => y,
+                MouseScrollDelta::PixelDelta(position) => position.cast::<f32>().y,
+            };
+
+            if let RendererState::Ready(gpu) = &mut self.renderer {
+                gpu.zoom_camera(zoom_delta);
+                window.request_redraw();
+            }
         }
     }
 
@@ -132,7 +193,7 @@ mod browser {
             window_id: WindowId,
             event: WindowEvent,
         ) {
-            let Some(window) = self.window.as_ref() else {
+            let Some(window) = self.window.as_ref().map(Arc::clone) else {
                 return;
             };
 
@@ -169,6 +230,19 @@ mod browser {
                             window.request_redraw();
                         }
                     }
+                }
+
+                WindowEvent::MouseInput { state, button, .. } => {
+                    self.handle_mouse_input(state, button);
+                }
+                WindowEvent::CursorMoved { position, .. } => {
+                    self.handle_cursor_moved(position, window.as_ref());
+                }
+                WindowEvent::MouseWheel { delta, .. } => {
+                    self.handle_mouse_wheel(delta, window.as_ref());
+                }
+                WindowEvent::Focused(false) | WindowEvent::CursorLeft { .. } => {
+                    self.orbit_gesture = OrbitGesture::Inactive;
                 }
                 _ => {}
             }
