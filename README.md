@@ -8,17 +8,45 @@
 
 ## 当前状态
 
-项目处于 **M0：启动**。workspace 和测试资产已经就绪，桌面入口仍是最小占位程序；当前任务是创建窗口、使用 wgpu 清屏并正常退出。唯一执行状态记录在[项目路线图](docs/roadmap.md)中。
+项目处于 **M2：从查看器到检查器**。M1 已完成固定 `Box.glb` 的解析、节点变换、Windows/Web 共享渲染、深度测试、背面剔除和轨道相机。当前任务是建立能够表达 v0.1 范围且不绑定第三方 glTF 类型的内部资产模型与统计。
+
+唯一执行状态记录在[项目路线图](docs/roadmap.md)中。
+
+![SceneScope 在 Windows 中渲染 Khronos Box.glb](docs/images/scenescope-m1-desktop.png)
 
 ## 快速开始
 
-前置条件：Rust 1.85 或更高版本。
+前置条件：Rust 1.87 或更高版本。
+
+### Windows 桌面端
 
 ```powershell
 cargo run -p scenescope-desktop
 ```
 
-当前命令只验证 workspace 并输出 `Hello, world!`，尚未创建图形窗口。
+程序会加载仓库固定的 `assets/test/Box.glb`。按住鼠标左键拖动可环绕模型，使用滚轮缩放。
+
+### Web 端
+
+首次构建需要安装 `wasm32-unknown-unknown` target 和 `wasm-pack`。完成前置安装后执行：
+
+```powershell
+wasm-pack build apps/web --target web --dev
+python -m http.server 8080 --directory apps/web
+```
+
+然后访问 <http://127.0.0.1:8080/>。Web 端与桌面端使用同一份 `MeshInstance`、渲染器和相机逻辑。
+
+## 当前能力
+
+- 从 GLB 字节读取默认场景中的首个静态 indexed triangle primitive。
+- 提取 `POSITION`、可选 `NORMAL`、`u32` 索引和首个 mesh 节点的层级变换。
+- 使用共享 `wgpu` 渲染器在 Windows 与 Web 中显示固定 `Box.glb`。
+- 支持深度测试、背面剔除、Lambert 漫反射、轨道相机和滚轮缩放。
+- 使用 sRGB Surface View 保持桌面端与 Web 端的颜色输出语义一致。
+- 自动化测试验证 Box 的 24 个顶点、36 个索引、法线和世界变换。
+
+## 开发检查
 
 日常开发检查会报告警告，但不会因普通 warning 中断：
 
@@ -43,13 +71,16 @@ cargo doc --workspace --all-features --no-deps --release
 ## Workspace
 
 ```text
-crates/scenescope-core  # 平台无关 Core，当前尚无领域实现
-apps/desktop            # Windows 原生入口，当前为最小占位程序
-assets/test             # 固定版本的公开回归测试资产及许可记录
-docs                    # 产品规格、路线图、架构和决策记录
+crates/scenescope-core    # 平台无关的内部场景数据
+crates/scenescope-gltf    # GLB/glTF 适配与内部模型转换
+crates/scenescope-render  # Windows/Web 共用的 wgpu 渲染器
+apps/desktop              # Windows 原生入口与输入事件
+apps/web                  # WebAssembly 入口与浏览器事件生命周期
+assets/test               # 固定公开回归资产及许可记录
+docs                      # 产品、路线图、架构、ADR 和调试记录
 ```
 
-长期目录见[架构设计](docs/architecture.md)。当前不建立没有真实消费者的 crate。
+依赖边界和后续目录见[架构设计](docs/architecture.md)。项目只在出现真实消费者时增加 crate。
 
 ## v0.1 范围
 
@@ -70,10 +101,18 @@ docs                    # 产品规格、路线图、架构和决策记录
 
 ## 当前限制
 
-- 尚未实现窗口、wgpu 清屏、GLB 解析或显示。
-- 尚未建立 Web 与 CLI 入口。
-- 尚无模型浏览 UI、检查规则或 JSON 报告。
-- 目前只在本机 Windows 环境验证；不能据此声称其他平台已受支持。
+- 当前入口只加载内嵌的 `Box.glb`，尚未支持本地文件选择。
+- 只解析默认场景（或首个场景）的首个 mesh 节点和首个 indexed triangle primitive。
+- 尚未读取 UV、材质、Base Color 纹理、多个 mesh 或完整节点树。
+- 尚无场景摘要 UI、资产统计界面、检查规则、CLI 或 JSON 报告。
+- 不支持动画、蒙皮、Morph Target、Draco、KTX2 或外部 buffer。
+- 当前只验证了 Windows 桌面端和浏览器中的 WebAssembly 构建与运行，不能据此声称其他平台已受支持。
+
+## 已知问题
+
+- 当前固定方向光会让背向光源的一侧明显变暗，这不是背面剔除错误。
+- Windows 入口目前使用持续重绘，静止时仍会占用额外 CPU/GPU 时间。
+- 加载或 GPU 初始化失败时尚无用户界面，Web 端错误只写入浏览器控制台。
 
 ## 文档索引
 
@@ -81,3 +120,5 @@ docs                    # 产品规格、路线图、架构和决策记录
 - [项目路线图](docs/roadmap.md)
 - [架构设计](docs/architecture.md)
 - [ADR-0001：项目基线](docs/adr/0001-project-foundation.md)
+- [ADR-0002：跨平台颜色输出](docs/adr/0002-cross-platform-color-output.md)
+- [调试记录：Desktop/Web 色差](docs/debugging/0001-desktop-web-color-difference.md)

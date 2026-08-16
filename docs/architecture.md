@@ -25,11 +25,26 @@ Desktop / Web / Mobile / CLI
 ## 3. 当前结构
 
 ```text
-crates/scenescope-core  # 空白 Core crate，尚无领域实现
-apps/desktop            # 最小占位入口，尚未接入窗口和 wgpu
+crates/scenescope-core    # MeshData、MeshInstance 等平台无关数据
+crates/scenescope-gltf    # GLB 校验、glTF 读取和内部数据转换
+crates/scenescope-render  # Windows/Web 共用的 wgpu 渲染与轨道相机
+apps/desktop              # Windows 窗口、生命周期和鼠标输入
+apps/web                  # WebAssembly 生命周期、异步 GPU 初始化和鼠标输入
 ```
 
-`assets/test/Box.glb` 已固定并登记许可。当前没有 glTF Adapter、Renderer、Web 或 CLI crate，也没有 GPU 实现。
+M1 使用最小的 `MeshData` 与 `MeshInstance` 表达一个静态 mesh primitive 及其世界变换。`scenescope-gltf` 不向外暴露第三方 glTF 类型，`scenescope-render` 只依赖 Core 数据，Desktop 与 Web 入口共享同一解析和渲染实现。
+
+当前数据流为：
+
+```text
+内嵌 Box.glb bytes
+  -> scenescope-gltf
+  -> MeshInstance
+  -> scenescope-render::GpuState
+  -> Desktop / Web Surface
+```
+
+这是 M1 的单 mesh 表达，不是 v0.1 最终模型。M2 将用 `AssetDocument` 承载完整节点层级、多个 mesh primitive、材质、纹理引用和统计。
 
 ## 4. 目标目录
 
@@ -100,8 +115,8 @@ pub trait InspectionRule {
 
 ## 8. 演进触发点
 
-- 开始 GLB 到内部模型的转换测试时，创建 `scenescope-gltf`。
-- Web 成为 GPU 代码的第二个消费者时，创建 `scenescope-render`。
+- `scenescope-gltf` 已在 GLB 到内部模型的首个转换测试出现后创建。
+- `scenescope-render` 已在 Web 成为 GPU 代码的第二个消费者后创建。
 - desktop 与 CLI 都需要同一检查编排时，再决定 Application Layer 是否独立成 crate。
 - 节点树和诊断界面形成真实需求时，再选择 GUI 框架。
 - `v0.1.0` 发布后，才创建移动端入口。

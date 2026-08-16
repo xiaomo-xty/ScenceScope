@@ -128,10 +128,10 @@ SceneScope 是基于 Rust 与 wgpu 的跨平台 3D 资产检查和验证工具�
 - 云端账号、上传、协作和商业化系统。
 - 移动端和主机平台发布。
 
-## 11. 待实现阶段确认
+## 11. 阶段决策状态
 
-- M0：确认 wgpu、winit 及最低 Rust 版本并写入 lockfile。
-- M1：根据首个解析测试选择 glTF 适配库和数学库。
-- M2：节点树和诊断列表产生真实需求后再决定 GUI 框架。
-- M3：确定 profile 文件格式、报告 JSON 字段和 CLI 退出码。
-- M4：通过 benchmark 和 profiler 数据确定大文件、加载时间和内存目标。
+- M0 已确认 Rust 1.87、wgpu 30、winit 0.30，并写入 workspace 与 lockfile。
+- M1 已根据首个转换测试选择 gltf 1.4 与 glam，第三方 glTF 类型被限制在 Adapter 内。
+- M2 待节点树、资源摘要和统计的真实交互需求明确后再选择 GUI 框架。
+- M3 将结合 GUI 与 CLI 两个消费者确定 profile 文件格式、报告 JSON 字段和退出码。
+- M4 将通过 benchmark 和 profiler 数据确定大文件、加载时间和内存目标。
