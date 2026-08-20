@@ -1,11 +1,8 @@
 #![cfg_attr(not(debug_assertions), deny(warnings))]
 
 //! `SceneScope` platform-independent core crate.
-//!
-//! The implementation is intentionally left to the project author.
-//!
-//!
 
+pub mod asset;
 /// A mesh placed in world space by a scene node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeshInstance {
