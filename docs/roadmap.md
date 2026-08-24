@@ -26,13 +26,13 @@ M0 和 M1 已关闭。M1 的可复现证据包括：
 
 | ID | 优先级 | 任务 | 验收标准 | 状态 |
 |---|---|---|---|---|
-| M2-001 | P0 | 建立 v0.1 内部 `AssetDocument` 和资产统计 | Core 类型不依赖 glTF/wgpu；能够表达 v0.1 所需节点、mesh primitive、材质、纹理引用和确定性统计 | 进行中 |
-| M2-002 | P0 | 扩展 GLB 转换与渲染输入 | 支持多个节点/mesh primitive、UV 和 Base Color 纹理；缺失可选属性有明确语义 | 待办 |
+| M2-001 | P0 | 建立 v0.1 内部 `AssetDocument` 和资产统计 | Core 类型不依赖 glTF/wgpu；能够表达 v0.1 所需节点、mesh primitive、材质、纹理引用和确定性统计 | 完成 |
+| M2-002 | P0 | 扩展 GLB 转换与渲染输入 | 支持多个节点/mesh primitive、UV 和 Base Color 纹理；缺失可选属性有明确语义 | 进行中 |
 | M2-003 | P0 | 接入 Windows/Web 本地文件选择 | 两端都以字节调用同一转换入口；取消选择不报错 | 待办 |
 | M2-004 | P0 | 显示节点树、资源摘要和统计 | 用户可浏览节点、网格、材质、纹理及核心统计 | 待办 |
 | M2-005 | P0 | 分类加载错误并增加回归资产 | 损坏、空或不支持输入不崩溃；多个 Khronos 资产通过回归检查 | 待办 |
 
-下一步：先根据解析、渲染两个现有消费者和 M2 已明确的统计需求设计 `AssetDocument` 的最小数据形状，再由项目作者实现 Core 类型和测试。
+下一步：扩展 glTF 适配器，将 GLB 转换为完整的 `AssetDocument`；先覆盖场景、节点和多个 mesh primitive，再加入 UV、材质与 Base Color 纹理。
 
 ## 3. 里程碑
 
@@ -103,8 +103,8 @@ M0 和 M1 已关闭。M1 的可复现证据包括：
 | M1-002 | M1 | P0 | Windows 渲染 Box | 完成 |
 | M1-003 | M1 | P0 | 节点 TRS、深度、剔除和轨道相机 | 完成 |
 | M1-004 | M1 | P0 | Web 第一帧并验证共享场景数据 | 完成 |
-| M2-001 | M2 | P0 | 内部 AssetDocument、节点树和统计 | 进行中 |
-| M2-002 | M2 | P0 | 多节点/primitive、UV 和 Base Color 纹理 | 待办 |
+| M2-001 | M2 | P0 | 内部 AssetDocument、节点树和统计 | 完成 |
+| M2-002 | M2 | P0 | 多节点/primitive、UV 和 Base Color 纹理 | 进行中 |
 | M2-003 | M2 | P0 | Windows/Web 本地文件选择 | 待办 |
 | M2-004 | M2 | P0 | 节点树、资源摘要和统计界面 | 待办 |
 | M2-005 | M2 | P0 | 错误分类与多个 Khronos 回归资产 | 待办 |
