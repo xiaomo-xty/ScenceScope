@@ -2,6 +2,10 @@
 //!
 //!
 
+use std::collections::HashSet;
+
+use crate::statistics::AssetStatistics;
+
 /// A platform-independent representation of an inspected asset.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AssetDocument {
@@ -26,7 +30,106 @@ pub struct AssetDocument {
     pub textures: Vec<Texture>,
 }
 
+/// Traverses the default scene graph using DFS and counts mesh instances and total triangles.
+///
+/// This function walks through all nodes in the document's default scene, starting from the
+/// scene root nodes and recursively visiting children. For each node that references a mesh,
+/// it increments the mesh instance count and accumulates the total triangle count across
+/// all mesh primitives.
+///
+/// Triangles are computed by dividing the number of indices in each primitive's geometry
+/// by 3 (assuming triangle-based indexing).
+///
+/// # Arguments
+///
+/// * `document` - A reference to the [`AssetDocument`] containing scenes, nodes, and meshes.
+///
+/// # Returns
+///
+/// A tuple of `(mesh_instance_count, triangle_count)`:
+/// * `mesh_instance_count` - The number of nodes in the scene that reference a mesh.
+/// * `triangle_count` - The total number of triangles across all mesh instances.
+///
+/// If the document has no default scene, returns `(0, 0)`.
+fn default_scene_counts(document: &AssetDocument) -> (usize, usize) {
+    let Some(scene) = document
+        .default_scene
+        .and_then(|scene_id| document.scene(scene_id))
+    else {
+        return (0, 0);
+    };
+
+    let mut pending_nodes = scene.roots.clone();
+    let mut visited_nodes = HashSet::new();
+
+    let mut mesh_instance_count = 0;
+    let mut triangle_count = 0;
+
+    while let Some(node_id) = pending_nodes.pop() {
+        if !visited_nodes.insert(node_id) {
+            continue;
+        }
+
+        let Some(node) = document.node(node_id) else {
+            continue;
+        };
+
+        pending_nodes.extend(node.children.iter().copied());
+
+        let Some(mesh) = node.mesh.and_then(|mesh_id| document.mesh(mesh_id)) else {
+            continue;
+        };
+
+        mesh_instance_count += 1;
+
+        triangle_count += mesh
+            .primitives
+            .iter()
+            .map(|primitive| primitive.geometry.indices.len() / 3)
+            .sum::<usize>();
+    }
+
+    (mesh_instance_count, triangle_count)
+}
+
 impl AssetDocument {
+    /// Computes statistics for this asset document.
+    #[must_use]
+    pub fn statistics(&self) -> AssetStatistics {
+        let primitive_count = self.meshes.iter().map(|mesh| mesh.primitives.len()).sum();
+
+        let stored_vertex_count = self
+            .meshes
+            .iter()
+            .flat_map(|mesh| mesh.primitives.iter())
+            .map(|primitive| primitive.geometry.positions.len())
+            .sum();
+
+        let stored_triangle_count: usize = self
+            .meshes
+            .iter()
+            .flat_map(|mesh| mesh.primitives.iter())
+            .map(|primitive| primitive.geometry.indices.len() / 3)
+            .sum();
+
+        let (default_scene_mesh_instance_count, default_scene_triangle_count) =
+            default_scene_counts(self);
+
+        // 在这里构造并返回 AssetStatistics
+        AssetStatistics {
+            scene_count: self.scenes.len(),
+            node_count: self.nodes.len(),
+            mesh_count: self.meshes.len(),
+            primitive_count,
+            material_count: self.materials.len(),
+            texture_count: self.textures.len(),
+            stored_vertex_count,
+            stored_triangle_count,
+            default_scene_mesh_instance_count,
+            default_scene_triangle_count,
+        }
+    }
+
     /// Returns the scene identified by `id`.
     ///
     /// Returns `None` when the index is out of bounds.

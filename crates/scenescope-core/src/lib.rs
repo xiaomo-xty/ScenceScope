@@ -3,6 +3,8 @@
 //! `SceneScope` platform-independent core crate.
 
 pub mod asset;
+pub mod statistics;
+
 /// A mesh placed in world space by a scene node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeshInstance {
