@@ -6,7 +6,12 @@
 
 use glam::Mat4;
 use gltf::{Gltf, buffer::Source, mesh::Mode};
-use scenescope_core::{MeshData, MeshInstance};
+use scenescope_core::{
+    MeshData, MeshInstance,
+    asset::{
+        AssetDocument, Mesh, MeshId, MeshPrimitive, Node, NodeId, NodeTransform, Scene, SceneId,
+    },
+};
 use thiserror::Error;
 
 const GLB_MAGIC: &[u8; 4] = b"glTF";
@@ -33,13 +38,13 @@ enum ParseErrorKind {
     #[error("binary glTF does not contain a mesh primitive")]
     MissingMeshPrimitive,
 
-    #[error("first mesh primitive is not a triangle list")]
+    #[error("mesh primitive is not a triangle list")]
     UnsupportedPrimitiveMode,
 
-    #[error("first mesh primitive has no readable POSITION attribute")]
+    #[error("mesh primitive has no readable POSITION attribute")]
     MissingPositions,
 
-    #[error("first mesh primitive has no readable indices")]
+    #[error("mesh primitive has no readable indices")]
     MissingIndices,
 
     #[error("binary glTF does not contain a scene")]
@@ -63,6 +68,130 @@ fn find_first_mesh_node<'a>(
 
     node.children()
         .find_map(|child| find_first_mesh_node(&child, world))
+}
+
+fn convert_scene(scene: &gltf::Scene<'_>) -> Scene {
+    Scene {
+        name: None,
+        roots: scene
+            .nodes()
+            .map(|node| NodeId::from_index(node.index()))
+            .collect(),
+    }
+}
+
+fn convert_node(node: &gltf::Node<'_>) -> Node {
+    let (translation, rotation, scale) = node.transform().decomposed();
+
+    Node {
+        name: None,
+        children: node
+            .children()
+            .map(|child| NodeId::from_index(child.index()))
+            .collect(),
+        mesh: node.mesh().map(|mesh| MeshId::from_index(mesh.index())),
+        transform: NodeTransform {
+            translation,
+            rotation,
+            scale,
+        },
+    }
+}
+
+fn convert_mesh(mesh: &gltf::Mesh<'_>, blob: &[u8]) -> Result<Mesh, ParseError> {
+    let primitives = mesh
+        .primitives()
+        .map(|primitive| convert_primitive(&primitive, blob))
+        .collect::<Result<Vec<_>, ParseError>>()?;
+
+    Ok(Mesh {
+        name: None,
+        primitives,
+    })
+}
+
+fn convert_primitive(
+    primitive: &gltf::Primitive<'_>,
+    blob: &[u8],
+) -> Result<MeshPrimitive, ParseError> {
+    // v0.1 accepts triangle-list primitives only.
+    if primitive.mode() != Mode::Triangles {
+        return Err(ParseErrorKind::UnsupportedPrimitiveMode.into());
+    }
+
+    let reader = primitive.reader(|buffer| match buffer.source() {
+        Source::Bin => Some(blob),
+        Source::Uri(_) => None,
+    });
+
+    let positions = reader
+        .read_positions()
+        .ok_or(ParseErrorKind::MissingPositions)?
+        .collect();
+
+    let indices = reader
+        .read_indices()
+        .ok_or(ParseErrorKind::MissingIndices)?
+        .into_u32()
+        .collect();
+
+    let normals = reader.read_normals().map(Iterator::collect);
+
+    Ok(MeshPrimitive {
+        geometry: MeshData {
+            positions,
+            indices,
+            normals,
+        },
+        material: None,
+    })
+}
+
+/// Parses a binary glTF asset into the internal asset document.
+///
+/// # Errors
+///
+/// Returns an error when the input is not a valid supported `GLB` file.
+pub fn parse_asset_document(bytes: &[u8]) -> Result<AssetDocument, ParseError> {
+    if !bytes.starts_with(GLB_MAGIC) {
+        return Err(ParseErrorKind::NotGlb.into());
+    }
+
+    let gltf = Gltf::from_slice(bytes).map_err(ParseErrorKind::InvalidGltf)?;
+
+    if gltf
+        .buffers()
+        .any(|buffer| matches!(buffer.source(), Source::Uri(_)))
+    {
+        return Err(ParseErrorKind::ExternalBuffer.into());
+    }
+
+    let scenes = gltf.scenes().map(|scene| convert_scene(&scene)).collect();
+
+    let default_scene = gltf
+        .default_scene()
+        .map(|scene| SceneId::from_index(scene.index()));
+
+    let nodes = gltf.nodes().map(|node| convert_node(&node)).collect();
+
+    let blob = gltf
+        .blob
+        .as_deref()
+        .ok_or(ParseErrorKind::MissingBinaryBlob)?;
+
+    let meshes = gltf
+        .meshes()
+        .map(|mesh| convert_mesh(&mesh, blob))
+        .collect::<Result<Vec<_>, ParseError>>()?;
+
+    Ok(AssetDocument {
+        scenes,
+        default_scene,
+        nodes,
+        meshes,
+        materials: Vec::new(),
+        textures: Vec::new(),
+    })
 }
 
 /// Parses the first mesh primitive from a `GLB` byte slice.
@@ -149,6 +278,10 @@ pub fn parse_first_mesh_primitive(bytes: &[u8]) -> Result<MeshInstance, ParseErr
 mod tests {
     // use glam::Mat4;
 
+    use scenescope_core::asset::MeshId;
+
+    use crate::parse_asset_document;
+
     use super::{ParseError, ParseErrorKind, parse_first_mesh_primitive};
 
     const BOX_GLB: &[u8] = include_bytes!("../../../assets/test/Box.glb");
@@ -208,5 +341,41 @@ mod tests {
             matches!(result, Err(ParseError(ParseErrorKind::NotGlb))),
             "non-GLB bytes should produce the NotGlb error"
         );
+    }
+
+    #[test]
+    fn parse_box_asset_document() -> Result<(), ParseError> {
+        let document = parse_asset_document(BOX_GLB)?;
+
+        assert_eq!(document.scenes.len(), 1);
+        assert_eq!(document.nodes.len(), 2);
+        assert_eq!(document.meshes.len(), 1);
+
+        assert_eq!(
+            document
+                .mesh(MeshId::from_index(0))
+                .map(|mesh| mesh.primitives.len()),
+            Some(1),
+            "Box.glb mesh should contain one primitive"
+        );
+
+        let geometry_shape = document
+            .mesh(MeshId::from_index(0))
+            .and_then(|mesh| mesh.primitives.first())
+            .map(|primitive| {
+                (
+                    primitive.geometry.positions.len(),
+                    primitive.geometry.indices.len(),
+                    primitive.geometry.normals.as_ref().map(Vec::len),
+                )
+            });
+
+        assert_eq!(
+            geometry_shape,
+            Some((24, 36, Some(24))),
+            "Box.glb primitive should preserve positions, indices, and normals"
+        );
+
+        Ok(())
     }
 }
