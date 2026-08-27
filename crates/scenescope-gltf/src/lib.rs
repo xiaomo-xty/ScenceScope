@@ -9,7 +9,8 @@ use gltf::{Gltf, buffer::Source, mesh::Mode};
 use scenescope_core::{
     MeshData, MeshInstance,
     asset::{
-        AssetDocument, Mesh, MeshId, MeshPrimitive, Node, NodeId, NodeTransform, Scene, SceneId,
+        AssetDocument, Material, MaterialId, Mesh, MeshId, MeshPrimitive, Node, NodeId,
+        NodeTransform, Scene, SceneId,
     },
 };
 use thiserror::Error;
@@ -143,8 +144,19 @@ fn convert_primitive(
             indices,
             normals,
         },
-        material: None,
+        material: primitive.material().index().map(MaterialId::from_index),
     })
+}
+
+fn convert_material(material: &gltf::Material<'_>) -> Material {
+    let pbr = material.pbr_metallic_roughness();
+
+    Material {
+        name: None,
+        base_color_factor: pbr.base_color_factor(),
+        base_color_texture: None,
+        double_sided: material.double_sided(),
+    }
 }
 
 /// Parses a binary glTF asset into the internal asset document.
@@ -184,12 +196,17 @@ pub fn parse_asset_document(bytes: &[u8]) -> Result<AssetDocument, ParseError> {
         .map(|mesh| convert_mesh(&mesh, blob))
         .collect::<Result<Vec<_>, ParseError>>()?;
 
+    let materials: Vec<Material> = gltf
+        .materials()
+        .map(|material| convert_material(&material))
+        .collect();
+
     Ok(AssetDocument {
         scenes,
         default_scene,
         nodes,
         meshes,
-        materials: Vec::new(),
+        materials,
         textures: Vec::new(),
     })
 }
@@ -277,8 +294,7 @@ pub fn parse_first_mesh_primitive(bytes: &[u8]) -> Result<MeshInstance, ParseErr
 #[cfg(test)]
 mod tests {
     // use glam::Mat4;
-
-    use scenescope_core::asset::MeshId;
+    use scenescope_core::asset::{MaterialId, MeshId};
 
     use crate::parse_asset_document;
 
@@ -374,6 +390,39 @@ mod tests {
             geometry_shape,
             Some((24, 36, Some(24))),
             "Box.glb primitive should preserve positions, indices, and normals"
+        );
+
+        assert_eq!(
+            document.materials.len(),
+            1,
+            "Box.glb should contain one material"
+        );
+
+        let material_id = MaterialId::from_index(0);
+
+        let primitive_material = document
+            .mesh(MeshId::from_index(0))
+            .and_then(|mesh| mesh.primitives.first())
+            .and_then(|primitve| primitve.material);
+
+        assert_eq!(
+            primitive_material,
+            Some(material_id),
+            "Box.glb primitive should reference material 0"
+        );
+
+        let material_properties = document.material(material_id).map(|material| {
+            (
+                material.base_color_factor,
+                material.base_color_texture,
+                material.double_sided,
+            )
+        });
+
+        assert_eq!(
+            material_properties,
+            Some(([0.8, 0.0, 0.0, 1.0], None, false)),
+            "Box.glb material should preserve its basic properties"
         );
 
         Ok(())
