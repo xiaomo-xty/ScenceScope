@@ -26,4 +26,7 @@ pub struct MeshData {
 
     /// Vertex normals supplied by the source asset.
     pub normals: Option<Vec<[f32; 3]>>,
+
+    /// uv coords
+    pub uvs: Option<Vec<[f32; 2]>>,
 }
