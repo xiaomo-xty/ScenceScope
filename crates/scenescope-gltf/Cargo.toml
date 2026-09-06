@@ -8,9 +8,13 @@ repository.workspace = true
 
 [dependencies]
 glam = "0.33.3"
-gltf = { version = "1.4.1", default-features = false, features = ["utils"] }
+gltf = { version = "1.4.1", default-features = false, features = ["utils", "names"] }
+libjpeg-turbo-rs = { version = "0.8", features = ["png"] }
 scenescope-core = { version = "0.1.0", path = "../scenescope-core" }
 thiserror = "2.0.19"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+png = "0.18.1"

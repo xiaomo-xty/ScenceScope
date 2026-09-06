@@ -6,11 +6,12 @@
 
 use glam::Mat4;
 use gltf::{Gltf, buffer::Source, mesh::Mode};
+use libjpeg_turbo_rs::{PixelFormat, decompress_to, load_png_from_bytes};
 use scenescope_core::{
     MeshData, MeshInstance,
     asset::{
         AssetDocument, Material, MaterialId, Mesh, MeshId, MeshPrimitive, Node, NodeId,
-        NodeTransform, Scene, SceneId,
+        NodeTransform, Scene, SceneId, Texture,
     },
 };
 use thiserror::Error;
@@ -53,6 +54,21 @@ enum ParseErrorKind {
 
     #[error("scene does not contain a mesh node")]
     MissingMeshNode,
+
+    #[error("texture images must be embedded in the GLB BIN chunk")]
+    ExternalTextureSource,
+
+    #[error("texture buffer view is out of bounds of the binary glTF buffer")]
+    TextureBufferOutBounds,
+
+    #[error("unsupported texture image format: {0:?}")]
+    UnsupportedImageFormat(String),
+
+    #[error("failed to decode texture iamge: {0}")]
+    ImageDecodeFailed(libjpeg_turbo_rs::JpegError),
+
+    #[error("attribute {attribute} count does not match POSITION count")]
+    AttributeCountMismatch { attribute: &'static str },
 }
 
 fn find_first_mesh_node<'a>(
@@ -73,7 +89,7 @@ fn find_first_mesh_node<'a>(
 
 fn convert_scene(scene: &gltf::Scene<'_>) -> Scene {
     Scene {
-        name: None,
+        name: scene.name().map(str::to_owned),
         roots: scene
             .nodes()
             .map(|node| NodeId::from_index(node.index()))
@@ -85,7 +101,7 @@ fn convert_node(node: &gltf::Node<'_>) -> Node {
     let (translation, rotation, scale) = node.transform().decomposed();
 
     Node {
-        name: None,
+        name: node.name().map(str::to_owned),
         children: node
             .children()
             .map(|child| NodeId::from_index(child.index()))
@@ -106,7 +122,7 @@ fn convert_mesh(mesh: &gltf::Mesh<'_>, blob: &[u8]) -> Result<Mesh, ParseError> 
         .collect::<Result<Vec<_>, ParseError>>()?;
 
     Ok(Mesh {
-        name: None,
+        name: mesh.name().map(str::to_owned),
         primitives,
     })
 }
@@ -125,7 +141,7 @@ fn convert_primitive(
         Source::Uri(_) => None,
     });
 
-    let positions = reader
+    let positions: Vec<[f32; 3]> = reader
         .read_positions()
         .ok_or(ParseErrorKind::MissingPositions)?
         .collect();
@@ -136,13 +152,38 @@ fn convert_primitive(
         .into_u32()
         .collect();
 
-    let normals = reader.read_normals().map(Iterator::collect);
+    // let normals = reader.read_normals().map(Iterator::collect);
+
+    let normals: Option<Vec<[f32; 3]>> = reader.read_normals().map(Iterator::collect); // ← 闭包内 rustc 能推断出 collect -> Vec<[f32; 3]>
+
+    if let Some(normals) = normals.as_deref() {
+        if normals.len() != positions.len() {
+            return Err(ParseErrorKind::AttributeCountMismatch {
+                attribute: "NORMAL",
+            }
+            .into());
+        }
+    }
+
+    let uvs = reader
+        .read_tex_coords(0)
+        .map(|coords| coords.into_f32().collect::<Vec<[f32; 2]>>());
+
+    if let Some(uvs) = uvs.as_deref() {
+        if uvs.len() != positions.len() {
+            return Err(ParseErrorKind::AttributeCountMismatch {
+                attribute: "TEXCOORD_0",
+            }
+            .into());
+        }
+    }
 
     Ok(MeshPrimitive {
         geometry: MeshData {
             positions,
             indices,
             normals,
+            uvs,
         },
         material: primitive.material().index().map(MaterialId::from_index),
     })
@@ -152,11 +193,74 @@ fn convert_material(material: &gltf::Material<'_>) -> Material {
     let pbr = material.pbr_metallic_roughness();
 
     Material {
-        name: None,
+        name: material.name().map(str::to_owned),
         base_color_factor: pbr.base_color_factor(),
         base_color_texture: None,
         double_sided: material.double_sided(),
     }
+}
+
+fn convert_texture(texture: &gltf::Texture<'_>, blob: &[u8]) -> Result<Texture, ParseError> {
+    let (bytes, mime_type) = match texture.source().source() {
+        gltf::image::Source::View { view, mime_type } => {
+            let start = view.offset();
+            let end = start
+                .checked_add(view.length())
+                .ok_or(ParseErrorKind::TextureBufferOutBounds)?;
+
+            let bytes = blob
+                .get(start..end)
+                .ok_or(ParseErrorKind::TextureBufferOutBounds)?;
+            (bytes, mime_type)
+        }
+        gltf::image::Source::Uri { .. } => {
+            return Err(ParseErrorKind::ExternalTextureSource.into());
+        }
+    };
+
+    let (width, height, rgba8) = match mime_type {
+        "image/png" => decode_png(bytes)?,
+        "image/jpeg" => decode_jpeg(bytes)?,
+        other => {
+            return Err(ParseErrorKind::UnsupportedImageFormat(other.to_owned()).into());
+        }
+    };
+
+    Ok(Texture {
+        name: texture.name().map(str::to_owned),
+        width,
+        height,
+        rgba8,
+    })
+}
+
+fn decode_png(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), ParseError> {
+    let loaded = load_png_from_bytes(bytes).map_err(ParseErrorKind::ImageDecodeFailed)?;
+    let rgba8 = expand_to_rgba8(loaded.pixels, loaded.pixel_format)?;
+    Ok((to_u32(loaded.width)?, to_u32(loaded.height)?, rgba8))
+}
+
+fn decode_jpeg(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), ParseError> {
+    let image =
+        decompress_to(bytes, PixelFormat::Rgba).map_err(ParseErrorKind::ImageDecodeFailed)?;
+    Ok((to_u32(image.width)?, to_u32(image.height)?, image.data))
+}
+
+/// 将解码结果统一为 RGBA8；Grayscale/Rgb/Rgba 之外的格式拒绝。
+fn expand_to_rgba8(pixels: Vec<u8>, format: PixelFormat) -> Result<Vec<u8>, ParseError> {
+    match format {
+        PixelFormat::Rgba => Ok(pixels),
+        PixelFormat::Rgb => Ok(pixels
+            .chunks_exact(3)
+            .flat_map(|rgb| rgb.iter().copied().chain(std::iter::once(255)))
+            .collect()),
+        PixelFormat::Grayscale => Ok(pixels.into_iter().flat_map(|g| [g, g, g, 255]).collect()),
+        other => Err(ParseErrorKind::UnsupportedImageFormat(format!("{other:?}")).into()),
+    }
+}
+
+fn to_u32(size: usize) -> Result<u32, ParseError> {
+    u32::try_from(size).map_err(|_| ParseErrorKind::TextureBufferOutBounds.into())
 }
 
 /// Parses a binary glTF asset into the internal asset document.
@@ -201,13 +305,18 @@ pub fn parse_asset_document(bytes: &[u8]) -> Result<AssetDocument, ParseError> {
         .map(|material| convert_material(&material))
         .collect();
 
+    let textures = gltf
+        .textures()
+        .map(|texture| convert_texture(&texture, blob))
+        .collect::<Result<Vec<_>, ParseError>>()?;
+
     Ok(AssetDocument {
         scenes,
         default_scene,
         nodes,
         meshes,
         materials,
-        textures: Vec::new(),
+        textures,
     })
 }
 
@@ -279,10 +388,15 @@ pub fn parse_first_mesh_primitive(bytes: &[u8]) -> Result<MeshInstance, ParseErr
 
     let normals = reader.read_normals().map(Iterator::collect);
 
+    let uvs = reader
+        .read_tex_coords(0)
+        .map(|coords| coords.into_f32().collect::<Vec<[f32; 2]>>());
+
     let mesh = MeshData {
         positions,
         indices,
         normals,
+        uvs,
     };
 
     Ok(MeshInstance {
