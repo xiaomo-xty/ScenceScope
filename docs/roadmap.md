@@ -27,12 +27,12 @@ M0 和 M1 已关闭。M1 的可复现证据包括：
 | ID | 优先级 | 任务 | 验收标准 | 状态 |
 |---|---|---|---|---|
 | M2-001 | P0 | 建立 v0.1 内部 `AssetDocument` 和资产统计 | Core 类型不依赖 glTF/wgpu；能够表达 v0.1 所需节点、mesh primitive、材质、纹理引用和确定性统计 | 完成 |
-| M2-002 | P0 | 扩展 GLB 转换与渲染输入 | 支持多个节点/mesh primitive、UV 和 Base Color 纹理；缺失可选属性有明确语义 | 进行中 |
-| M2-003 | P0 | 接入 Windows/Web 本地文件选择 | 两端都以字节调用同一转换入口；取消选择不报错 | 待办 |
+| M2-002 | P0 | 扩展 GLB 转换与渲染输入 | 支持多个节点/mesh primitive、UV 和 Base Color 纹理；缺失可选属性有明确语义 | 完成 |
+| M2-003 | P0 | 接入 Windows/Web 本地文件选择 | 两端都以字节调用同一转换入口；取消选择不报错 | 就绪 |
 | M2-004 | P0 | 显示节点树、资源摘要和统计 | 用户可浏览节点、网格、材质、纹理及核心统计 | 待办 |
 | M2-005 | P0 | 分类加载错误并增加回归资产 | 损坏、空或不支持输入不崩溃；多个 Khronos 资产通过回归检查 | 待办 |
 
-M2-002 已覆盖场景、节点、多个 mesh primitive 与材质的转换（维持 Box 回归测试通过）。当前接入 UV（`TEXCOORD_0`）、名称保留与 Base Color 纹理：解码依赖选用 `libjpeg-turbo-rs` 0.8（启用 `png` feature，PNG/JPEG 一并解码），选型 spike 已验证 JPEG 编解码往返、PNG 解码和 wasm32 目标编译（临时目录验证，未入库）。纹理转换完成后进入 Windows/Web 本地文件选择（M2-003）。
+M2-002 已完成：`parse_asset_document` 覆盖场景、节点、多个 mesh primitive、材质与纹理的转换；UV（`TEXCOORD_0`）、对象名称与 Base Color 纹理（内嵌 PNG/JPEG，经 `libjpeg-turbo-rs` 0.8 解码为 RGBA8）均已接入，材质到纹理的引用已闭环。除 Box 回归外，测试使用手写 GLB fixture（`build_glb`）覆盖可选属性缺失、UV 数量不匹配、内嵌 PNG/JPEG、RGB/灰度展开与外部纹理拒绝等路径。下一步进入 M2-003（Windows/Web 本地文件选择）。
 
 ## 3. 里程碑
 
@@ -104,8 +104,8 @@ M2-002 已覆盖场景、节点、多个 mesh primitive 与材质的转换（维
 | M1-003 | M1 | P0 | 节点 TRS、深度、剔除和轨道相机 | 完成 |
 | M1-004 | M1 | P0 | Web 第一帧并验证共享场景数据 | 完成 |
 | M2-001 | M2 | P0 | 内部 AssetDocument、节点树和统计 | 完成 |
-| M2-002 | M2 | P0 | 多节点/primitive、UV 和 Base Color 纹理 | 进行中 |
-| M2-003 | M2 | P0 | Windows/Web 本地文件选择 | 待办 |
+| M2-002 | M2 | P0 | 多节点/primitive、UV 和 Base Color 纹理 | 完成 |
+| M2-003 | M2 | P0 | Windows/Web 本地文件选择 | 就绪 |
 | M2-004 | M2 | P0 | 节点树、资源摘要和统计界面 | 待办 |
 | M2-005 | M2 | P0 | 错误分类与多个 Khronos 回归资产 | 待办 |
 | M2-006 | M2 | P1 | Windows 文件拖放 | 待办 |
@@ -126,6 +126,7 @@ M2-002 已覆盖场景、节点、多个 mesh primitive 与材质的转换（维
 | 过早拆 crate 或设计插件 | 时间消耗在无消费者抽象上 | 第二个真实消费者出现后再提取 |
 | 损坏 GLB 触发 panic 或过量分配 | 稳定性与安全性问题 | 校验长度/偏移/索引；加入失败和边界测试 |
 | glTF 图片解码依赖的安全背书在途 | 损坏或恶意图片在解码路径可能触发未发现的内存问题（当前无已知活 UB） | `libjpeg-turbo-rs` 0.8 上游 2026-08 审计发现的 safe API 缺陷（P4-135..138）均已修复关闭，但 P4-139/P4-141 未关闭、无正式内存安全保证；只使用最小接口面（`decompress_to`/`load_png_from_bytes`，`compress` 仅测试）并分类返回错误；上游背书关闭或 0.9.0 发布时复查，必要时回退 `image` 0.25（zune-jpeg），隔离点在 `convert_texture` 一处 |
+| 内嵌图像缺失 mimeType 触发 `gltf` 依赖内部 panic | 损坏或恶意输入可能直接崩溃解析入口 | M2-005 错误分类阶段做前置校验或隔离；已记录于 README 已知问题 |
 | WebGPU/Surface 生命周期差异 | Web 或窗口恢复失败 | 保守 features/limits；分别进行真实运行验证 |
 | 测试资产许可不清 | 无法公开仓库或演示 | 只使用可追溯资产并保留归属和许可证 |
 | 把未验证平台写成已支持 | 项目说明失真 | 只声明真实构建和运行验证结果 |

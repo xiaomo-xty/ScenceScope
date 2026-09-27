@@ -1,0 +1,177 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 1232" font-family="'Microsoft YaHei','PingFang SC',sans-serif">
+  <rect x="0" y="0" width="1160" height="1232" fill="#ffffff"/>
+
+  <text x="60" y="46" font-size="24" font-weight="bold" fill="#0f172a">glTF / GLB 格式布局</text>
+  <text x="60" y="72" font-size="13" fill="#64748b">以 scenescope-gltf 测试 fixture（build_glb）生成的最小 GLB 为例：3 顶点三角形 + 可选 NORMAL / TEXCOORD_0 / 内嵌图像</text>
+
+  <text x="60" y="116" font-size="18" font-weight="bold" fill="#1d4ed8">① GLB 二进制容器</text>
+
+  <rect x="60" y="132" width="210" height="52" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="165" y="156" font-size="15" font-weight="bold" font-family="Consolas,monospace" fill="#1e3a8a" text-anchor="middle">glTF</text>
+  <text x="165" y="174" font-size="11" fill="#1e40af" text-anchor="middle">0..4 · 魔数</text>
+
+  <rect x="278" y="132" width="380" height="52" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="468" y="156" font-size="14" font-family="Consolas,monospace" fill="#1e3a8a" text-anchor="middle">version = 2</text>
+  <text x="468" y="174" font-size="11" fill="#1e40af" text-anchor="middle">4..8 · u32 LE</text>
+
+  <rect x="666" y="132" width="434" height="52" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="883" y="156" font-size="14" fill="#1e3a8a" text-anchor="middle">length = 文件总字节数</text>
+  <text x="883" y="174" font-size="11" fill="#1e40af" text-anchor="middle">8..12 · u32 LE</text>
+
+  <rect x="60" y="192" width="530" height="46" fill="#fef3c7" stroke="#eab308"/>
+  <text x="325" y="213" font-size="13" fill="#713f12" text-anchor="middle">12..16 · chunkLength = JSON 字节数（含填充）</text>
+  <rect x="598" y="192" width="502" height="46" fill="#fef3c7" stroke="#eab308"/>
+  <text x="849" y="213" font-size="13" font-family="Consolas,monospace" fill="#713f12" text-anchor="middle">16..20 · 0x4E4F534A → "JSON"</text>
+
+  <rect x="60" y="246" width="872" height="78" fill="#fefce8" stroke="#eab308"/>
+  <text x="496" y="278" font-size="15" font-weight="bold" fill="#713f12" text-anchor="middle">glTF JSON 文档（结构见 ②）</text>
+  <text x="496" y="302" font-size="11" font-family="Consolas,monospace" fill="#92400e" text-anchor="middle">asset · scene/scenes · nodes · meshes · accessors · bufferViews · buffers · materials · textures · images</text>
+  <rect x="932" y="246" width="168" height="78" fill="#e5e7eb" stroke="#9ca3af"/>
+  <text x="1016" y="278" font-size="12" fill="#4b5563" text-anchor="middle">0x20 空格填充</text>
+  <text x="1016" y="298" font-size="11" fill="#4b5563" text-anchor="middle">补齐 4 字节倍数</text>
+
+  <rect x="60" y="330" width="530" height="46" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="325" y="351" font-size="13" fill="#14532d" text-anchor="middle">chunkLength = BIN 字节数（含填充）</text>
+  <rect x="598" y="330" width="502" height="46" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="849" y="351" font-size="13" font-family="Consolas,monospace" fill="#14532d" text-anchor="middle">0x004E4942 → "BIN\0"</text>
+
+  <rect x="60" y="384" width="872" height="78" fill="#f0fdf4" stroke="#22c55e"/>
+  <text x="496" y="414" font-size="15" font-weight="bold" fill="#14532d" text-anchor="middle">BIN chunk：顶点 / 索引 / 内嵌图像的原始字节</text>
+  <text x="496" y="440" font-size="12" fill="#166534" text-anchor="middle">内部切片见 ③ —— JSON 里每个 bufferView 都指向这里的一段</text>
+  <rect x="932" y="384" width="168" height="78" fill="#e5e7eb" stroke="#9ca3af"/>
+  <text x="1016" y="416" font-size="12" fill="#4b5563" text-anchor="middle">0x00 填充</text>
+  <text x="1016" y="436" font-size="11" fill="#4b5563" text-anchor="middle">补齐 4 字节倍数</text>
+
+  <text x="60" y="486" font-size="12" fill="#64748b">所有 u32 均为小端（LE）；chunk 头中的长度按补齐后计 —— 对应 pack_glb()。</text>
+
+  <text x="60" y="524" font-size="18" font-weight="bold" fill="#1d4ed8">② JSON 文档：引用链（语义 → accessor → bufferView → buffer）</text>
+
+  <rect x="60" y="548" width="190" height="38" fill="#ffffff" stroke="#64748b"/>
+  <text x="155" y="572" font-size="14" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">scene: 0</text>
+  <line x1="155" y1="586" x2="155" y2="600" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="150,600 160,600 155,610" fill="#475569"/>
+  <rect x="60" y="610" width="190" height="38" fill="#ffffff" stroke="#64748b"/>
+  <text x="155" y="634" font-size="14" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">nodes: [0]</text>
+  <line x1="155" y1="648" x2="155" y2="662" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="150,662 160,662 155,672" fill="#475569"/>
+  <rect x="60" y="672" width="190" height="52" fill="#ffffff" stroke="#64748b"/>
+  <text x="155" y="694" font-size="13" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">node 0</text>
+  <text x="155" y="714" font-size="12" fill="#64748b" text-anchor="middle">{ mesh: 0 }</text>
+  <line x1="250" y1="698" x2="287" y2="698" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="287,693 287,703 297,698" fill="#475569"/>
+
+  <rect x="300" y="548" width="252" height="210" fill="#ffffff" stroke="#64748b"/>
+  <text x="426" y="572" font-size="14" font-weight="bold" font-family="Consolas,monospace" fill="#0f172a" text-anchor="middle">primitives[0]</text>
+  <text x="426" y="588" font-size="11" fill="#64748b" text-anchor="middle">meshes[0] 的唯一 primitive</text>
+  <text x="316" y="614" font-size="12.5" font-family="Consolas,monospace" fill="#1f2937">POSITION   → a0</text>
+  <text x="316" y="634" font-size="12.5" font-family="Consolas,monospace" fill="#1f2937">NORMAL     → a1</text>
+  <text x="316" y="654" font-size="12.5" font-family="Consolas,monospace" fill="#1f2937">TEXCOORD_0 → a2</text>
+  <text x="316" y="678" font-size="12.5" font-family="Consolas,monospace" fill="#1f2937">indices    → a3</text>
+  <text x="316" y="702" font-size="12.5" font-family="Consolas,monospace" fill="#1f2937">material   → 0</text>
+
+  <line x1="552" y1="640" x2="584" y2="640" stroke="#475569" stroke-width="2.5"/>
+  <polygon points="584,632 584,648 598,640" fill="#475569"/>
+
+  <rect x="600" y="548" width="258" height="32" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="729" y="569" font-size="13" font-weight="bold" fill="#0f172a" text-anchor="middle">accessors（怎么读）</text>
+  <rect x="600" y="580" width="258" height="42" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="612" y="606" font-size="12" font-family="Consolas,monospace" fill="#1f2937">0  VEC3 · FLOAT · 3</text>
+  <text x="846" y="606" font-size="12" font-family="Consolas,monospace" fill="#475569" text-anchor="end">view 0</text>
+  <rect x="600" y="622" width="258" height="42" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="612" y="648" font-size="12" font-family="Consolas,monospace" fill="#1f2937">1  VEC3 · FLOAT · 3</text>
+  <text x="846" y="648" font-size="12" font-family="Consolas,monospace" fill="#475569" text-anchor="end">view 1</text>
+  <rect x="600" y="664" width="258" height="42" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="612" y="690" font-size="12" font-family="Consolas,monospace" fill="#1f2937">2  VEC2 · FLOAT · 3</text>
+  <text x="846" y="690" font-size="12" font-family="Consolas,monospace" fill="#475569" text-anchor="end">view 2</text>
+  <rect x="600" y="706" width="258" height="42" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="612" y="732" font-size="12" font-family="Consolas,monospace" fill="#1f2937">3  SCALAR · U32 · 3</text>
+  <text x="846" y="732" font-size="12" font-family="Consolas,monospace" fill="#475569" text-anchor="end">view 3</text>
+  <text x="729" y="770" font-size="11" fill="#64748b" text-anchor="middle">componentType = 分量二进制类型 · type = 每元素分量数 · count = 元素数</text>
+
+  <line x1="858" y1="601" x2="890" y2="601" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="890,596 890,606 900,601" fill="#475569"/>
+  <line x1="858" y1="643" x2="890" y2="643" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="890,638 890,648 900,643" fill="#475569"/>
+  <line x1="858" y1="685" x2="890" y2="685" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="890,680 890,690 900,685" fill="#475569"/>
+  <line x1="858" y1="727" x2="890" y2="727" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="890,722 890,732 900,727" fill="#475569"/>
+
+  <rect x="906" y="548" width="194" height="32" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="1003" y="569" font-size="13" font-weight="bold" fill="#0f172a" text-anchor="middle">bufferViews（去哪切）</text>
+  <rect x="906" y="580" width="194" height="42" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1003" y="606" font-size="12" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">0  off 0   len 36</text>
+  <rect x="906" y="622" width="194" height="42" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1003" y="648" font-size="12" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">1  off 36  len 36</text>
+  <rect x="906" y="664" width="194" height="42" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1003" y="690" font-size="12" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">2  off 72  len 24</text>
+  <rect x="906" y="706" width="194" height="42" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1003" y="732" font-size="12" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">3  off 96  len 12</text>
+  <rect x="906" y="748" width="194" height="42" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1003" y="774" font-size="12" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">4  off 108 len N</text>
+  <line x1="1003" y1="816" x2="1003" y2="760" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="998,760 1008,760 1003,750" fill="#475569"/>
+
+  <rect x="60" y="816" width="190" height="56" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="155" y="838" font-size="12" font-family="Consolas,monospace" fill="#334155" text-anchor="middle">buffer 0（无 uri）</text>
+  <text x="155" y="858" font-size="11" fill="#64748b" text-anchor="middle">= 整个 BIN chunk</text>
+
+  <line x1="426" y1="758" x2="426" y2="806" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="421,806 431,806 426,816" fill="#475569"/>
+  <rect x="300" y="816" width="252" height="56" fill="#ffffff" stroke="#64748b"/>
+  <text x="426" y="838" font-size="13" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">materials[0]</text>
+  <text x="426" y="858" font-size="11" fill="#64748b" text-anchor="middle">baseColorTexture { index: 0 }</text>
+  <line x1="552" y1="844" x2="586" y2="844" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="586,839 586,849 596,844" fill="#475569"/>
+  <rect x="600" y="816" width="258" height="56" fill="#ffffff" stroke="#64748b"/>
+  <text x="729" y="838" font-size="13" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">textures[0]</text>
+  <text x="729" y="858" font-size="11" fill="#64748b" text-anchor="middle">{ source: 0 }</text>
+  <line x1="858" y1="844" x2="892" y2="844" stroke="#475569" stroke-width="1.6"/>
+  <polygon points="892,839 892,849 902,844" fill="#475569"/>
+  <rect x="906" y="816" width="194" height="56" fill="#ffffff" stroke="#64748b"/>
+  <text x="1003" y="838" font-size="13" font-family="Consolas,monospace" fill="#1f2937" text-anchor="middle">images[0]</text>
+  <text x="1003" y="858" font-size="11" fill="#64748b" text-anchor="middle">{ bufferView:4, mimeType }</text>
+
+  <text x="60" y="922" font-size="18" font-weight="bold" fill="#1d4ed8">③ BIN chunk 内部切片（fixture 的真实字节布局）</text>
+
+  <rect x="60" y="948" width="225" height="64" fill="#bfdbfe" stroke="#60a5fa"/>
+  <text x="172" y="972" font-size="13" font-weight="bold" fill="#1e3a8a" text-anchor="middle">POSITION</text>
+  <text x="172" y="992" font-size="11" font-family="Consolas,monospace" fill="#1e40af" text-anchor="middle">3×VEC3×f32 = 36 B</text>
+  <rect x="287" y="948" width="225" height="64" fill="#c7d2fe" stroke="#818cf8"/>
+  <text x="399" y="972" font-size="13" font-weight="bold" fill="#312e81" text-anchor="middle">NORMAL</text>
+  <text x="399" y="992" font-size="11" font-family="Consolas,monospace" fill="#3730a3" text-anchor="middle">3×VEC3×f32 = 36 B</text>
+  <rect x="514" y="948" width="150" height="64" fill="#ddd6fe" stroke="#a78bfa"/>
+  <text x="589" y="972" font-size="12.5" font-weight="bold" fill="#4c1d95" text-anchor="middle">TEXCOORD_0</text>
+  <text x="589" y="992" font-size="11" font-family="Consolas,monospace" fill="#5b21b6" text-anchor="middle">3×VEC2 = 24 B</text>
+  <rect x="666" y="948" width="100" height="64" fill="#fde68a" stroke="#f59e0b"/>
+  <text x="716" y="972" font-size="12.5" font-weight="bold" fill="#78350f" text-anchor="middle">indices</text>
+  <text x="716" y="992" font-size="11" font-family="Consolas,monospace" fill="#92400e" text-anchor="middle">3×u32 = 12 B</text>
+  <rect x="768" y="948" width="270" height="64" fill="#fbcfe8" stroke="#ec4899"/>
+  <text x="903" y="972" font-size="13" font-weight="bold" fill="#831843" text-anchor="middle">图像编码字节（PNG / JPEG）</text>
+  <text x="903" y="992" font-size="11" font-family="Consolas,monospace" fill="#9d174d" text-anchor="middle">byteLength = N</text>
+  <rect x="1040" y="948" width="60" height="64" fill="#e5e7eb" stroke="#9ca3af"/>
+  <text x="1070" y="974" font-size="11" fill="#4b5563" text-anchor="middle">0x00</text>
+  <text x="1070" y="992" font-size="11" fill="#4b5563" text-anchor="middle">填充</text>
+
+  <line x1="60" y1="1014" x2="60" y2="1026" stroke="#94a3b8"/>
+  <text x="60" y="1042" font-size="11" font-family="Consolas,monospace" fill="#64748b" text-anchor="middle">0</text>
+  <line x1="287" y1="1014" x2="287" y2="1026" stroke="#94a3b8"/>
+  <text x="287" y="1042" font-size="11" font-family="Consolas,monospace" fill="#64748b" text-anchor="middle">36</text>
+  <line x1="514" y1="1014" x2="514" y2="1026" stroke="#94a3b8"/>
+  <text x="514" y="1042" font-size="11" font-family="Consolas,monospace" fill="#64748b" text-anchor="middle">72</text>
+  <line x1="666" y1="1014" x2="666" y2="1026" stroke="#94a3b8"/>
+  <text x="666" y="1042" font-size="11" font-family="Consolas,monospace" fill="#64748b" text-anchor="middle">96</text>
+  <line x1="768" y1="1014" x2="768" y2="1026" stroke="#94a3b8"/>
+  <text x="768" y="1042" font-size="11" font-family="Consolas,monospace" fill="#64748b" text-anchor="middle">108</text>
+  <line x1="1040" y1="1014" x2="1040" y2="1026" stroke="#94a3b8"/>
+  <text x="1040" y="1042" font-size="11" font-family="Consolas,monospace" fill="#64748b" text-anchor="middle">108+N</text>
+  <line x1="1100" y1="1014" x2="1100" y2="1026" stroke="#94a3b8"/>
+  <text x="1100" y="1042" font-size="11" fill="#64748b" text-anchor="middle">对齐后</text>
+
+  <text x="64" y="1082" font-size="12" fill="#64748b">offset = 写入前 bin 长度 · byteLength = 真实长度（不含填充）—— 对应 push_view()；格子宽度示意，非严格比例。</text>
+
+  <rect x="60" y="1096" width="1040" height="112" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="84" y="1124" font-size="14" font-weight="bold" fill="#0f172a">.gltf 与 .glb 的关系</text>
+  <text x="84" y="1150" font-size="12" fill="#334155">.gltf：上面这份 JSON 单独存文件；buffer 与图像用 uri 指向旁挂的 .bin / 贴图文件（SceneScope 对此报 ExternalBuffer / ExternalTextureSource）</text>
+  <text x="84" y="1176" font-size="12" fill="#334155">.glb：JSON 与 BIN 打包进同一个文件（本图）—— 即 build_glb() 生成、parse_asset_document() 消费的形态</text>
+</svg>

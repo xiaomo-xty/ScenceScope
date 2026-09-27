@@ -39,12 +39,14 @@ python -m http.server 8080 --directory apps/web
 
 ## 当前能力
 
-- 从 GLB 字节读取默认场景中的首个静态 indexed triangle primitive。
-- 提取 `POSITION`、可选 `NORMAL`、`u32` 索引和首个 mesh 节点的层级变换。
+- 将 GLB 字节解析为内部 `AssetDocument`：场景、节点层级、多个 mesh primitive、材质、纹理引用与确定性资产统计。
+- 提取 `POSITION`、可选 `NORMAL`、可选 `TEXCOORD_0`、`u32` 索引、对象名称和节点 TRS 变换。
+- 解码内嵌 Base Color 纹理（PNG/JPEG 统一为 RGBA8），并保留材质到纹理的引用。
+- 解析失败返回分类错误：非 GLB、外部 buffer/纹理、属性数量不匹配、不支持的图像格式等。
 - 使用共享 `wgpu` 渲染器在 Windows 与 Web 中显示固定 `Box.glb`。
 - 支持深度测试、背面剔除、Lambert 漫反射、轨道相机和滚轮缩放。
 - 使用 sRGB Surface View 保持桌面端与 Web 端的颜色输出语义一致。
-- 自动化测试验证 Box 的 24 个顶点、36 个索引、法线和世界变换。
+- 自动化测试覆盖 Box 回归（24 顶点、36 索引、法线、世界变换）和手写 GLB fixture（可选属性缺失、UV 数量不匹配、内嵌 PNG/JPEG 解码、外部纹理拒绝）。
 
 ## 开发检查
 
@@ -102,10 +104,10 @@ docs                      # 产品、路线图、架构、ADR 和调试记录
 ## 当前限制
 
 - 当前入口只加载内嵌的 `Box.glb`，尚未支持本地文件选择。
-- 只解析默认场景（或首个场景）的首个 mesh 节点和首个 indexed triangle primitive。
-- 尚未读取 UV、材质、Base Color 纹理、多个 mesh 或完整节点树。
+- 渲染路径仍只显示默认场景首个 mesh 节点的首个 indexed triangle primitive；解析侧已读取全部节点、mesh primitive、材质与纹理。
+- 渲染器尚未消费 UV 和 Base Color 纹理；材质信息目前只用于解析与统计。
 - 尚无场景摘要 UI、资产统计界面、检查规则、CLI 或 JSON 报告。
-- 不支持动画、蒙皮、Morph Target、Draco、KTX2 或外部 buffer。
+- 不支持动画、蒙皮、Morph Target、Draco、KTX2、外部 buffer；纹理仅接受 BIN 内嵌的 PNG/JPEG。
 - 当前只验证了 Windows 桌面端和浏览器中的 WebAssembly 构建与运行，不能据此声称其他平台已受支持。
 
 ## 已知问题
@@ -113,6 +115,7 @@ docs                      # 产品、路线图、架构、ADR 和调试记录
 - 当前固定方向光会让背向光源的一侧明显变暗，这不是背面剔除错误。
 - Windows 入口目前使用持续重绘，静止时仍会占用额外 CPU/GPU 时间。
 - 加载或 GPU 初始化失败时尚无用户界面，Web 端错误只写入浏览器控制台。
+- 内嵌图像缺失 mimeType 时，`gltf` 依赖会在解析内部 panic；错误分类计划在 M2-005 处理。
 
 ## 文档索引
 
@@ -122,3 +125,4 @@ docs                      # 产品、路线图、架构、ADR 和调试记录
 - [ADR-0001：项目基线](docs/adr/0001-project-foundation.md)
 - [ADR-0002：跨平台颜色输出](docs/adr/0002-cross-platform-color-output.md)
 - [调试记录：Desktop/Web 色差](docs/debugging/0001-desktop-web-color-difference.md)
+- [glTF/GLB 格式布局图](docs/images/gltf-layout.svg)

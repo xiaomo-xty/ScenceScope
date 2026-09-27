@@ -11,7 +11,7 @@ use scenescope_core::{
     MeshData, MeshInstance,
     asset::{
         AssetDocument, Material, MaterialId, Mesh, MeshId, MeshPrimitive, Node, NodeId,
-        NodeTransform, Scene, SceneId, Texture,
+        NodeTransform, Scene, SceneId, Texture, TextureId,
     },
 };
 use thiserror::Error;
@@ -195,7 +195,9 @@ fn convert_material(material: &gltf::Material<'_>) -> Material {
     Material {
         name: material.name().map(str::to_owned),
         base_color_factor: pbr.base_color_factor(),
-        base_color_texture: None,
+        base_color_texture: pbr
+            .base_color_texture()
+            .map(|info| TextureId::from_index(info.texture().index())),
         double_sided: material.double_sided(),
     }
 }
@@ -407,14 +409,272 @@ pub fn parse_first_mesh_primitive(bytes: &[u8]) -> Result<MeshInstance, ParseErr
 
 #[cfg(test)]
 mod tests {
+
+    #![allow(
+        clippy::unwrap_used,
+        clippy::indexing_slicing,
+        reason = "test-only fixture builders and assertions on deterministic data"
+    )]
+
+    // use gltf::Mesh;
     // use glam::Mat4;
-    use scenescope_core::asset::{MaterialId, MeshId};
+    use scenescope_core::asset::{MaterialId, MeshId, TextureId};
+    use serde_json::{Map, Value, json};
 
     use crate::parse_asset_document;
 
     use super::{ParseError, ParseErrorKind, parse_first_mesh_primitive};
 
+    /// glTF accessor componentType；数值即 WebGL 枚举（0x1406 等），见规范 §accessors。
+    const FLOAT: u32 = 5126;
+    const UNSIGNED_INT: u32 = 5125;
+
     const BOX_GLB: &[u8] = include_bytes!("../../../assets/test/Box.glb");
+
+    const DEFAULT_UVS: [[f32; 2]; 3] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+
+    /// Test input parameters: control whitch features the generated GLB contains.
+    /// This is a Test Data Builder pattern, but without the builder methods, since the test fixture is only used in this module.
+    #[derive(Default)]
+    struct FixtureOptions {
+        normals: bool,
+        uvs: bool,
+        /// Custom UV values; may hold fewer entries than vertices to force a mismatch.
+        uv_values: Vec<[f32; 2]>,
+        /// Embedded BIN image: (encoded bytes, mime type)
+        image: Option<(Vec<u8>, &'static str)>,
+        /// Use a URI image source instead of a bufferView.
+        image_uri: Option<&'static str>,
+    }
+
+    fn default_options() -> FixtureOptions {
+        FixtureOptions {
+            normals: true,
+            uvs: true,
+            ..Default::default()
+        }
+    }
+
+    fn build_glb(options: &FixtureOptions) -> Vec<u8> {
+        let positions: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let normals: [[f32; 3]; 3] = [[0.0, 0.0, 1.0]; 3];
+        let indices: [u32; 3] = [0, 1, 2];
+
+        let mut bin: Vec<u8> = Vec::new();
+        let mut buffer_views: Vec<Value> = Vec::new();
+        let mut accessors: Vec<Value> = Vec::new();
+
+        push_view(&mut bin, &mut buffer_views, &flatten_f32_3(&positions));
+        accessors.push(json!({
+            "bufferView": 0,
+            "componentType": FLOAT,
+            "count": positions.len(),
+            "type": "VEC3",
+            "min": [0.0, 0.0, 0.0],
+            "max": [1.0, 1.0, 0.0],
+        }));
+
+        let mut attributes = Map::new();
+        attributes.insert("POSITION".to_owned(), json!(0));
+
+        // ---- NORMAL ----
+        if options.normals {
+            let view = push_view(&mut bin, &mut buffer_views, &flatten_f32_3(&normals));
+            accessors.push(json!({
+                "bufferView": view,
+                "componentType": FLOAT,
+                "count": normals.len(),
+                "type": "VEC3",
+            }));
+            attributes.insert("NORMAL".to_owned(), json!(accessors.len() - 1));
+        }
+
+        // ---- TEXCOORD_0
+        if options.uvs {
+            let uvs: &[[f32; 2]] = if options.uv_values.is_empty() {
+                &DEFAULT_UVS
+            } else {
+                &options.uv_values
+            };
+
+            let view = push_view(&mut bin, &mut buffer_views, &flatten_f32_2(uvs));
+            accessors.push(json!({
+                "bufferView": view,
+                "componentType": FLOAT,
+                "count": uvs.len(),
+                "type": "VEC2",
+            }));
+            attributes.insert("TEXCOORD_0".to_owned(), json!(accessors.len() - 1));
+        }
+
+        let view = push_view(&mut bin, &mut buffer_views, &flatten_u32(&indices));
+        accessors.push(json!({
+            "bufferView": view,
+            "componentType": UNSIGNED_INT,
+            "count": indices.len(),
+            "type": "SCALAR",
+        }));
+        let indices_accessor = accessors.len() - 1;
+
+        // ---- 图像：两条互斥的来源分支 ----
+        let mut images: Vec<Value> = Vec::new();
+        let mut textures: Vec<Value> = Vec::new();
+        let mut material = json!({
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+            }
+        });
+
+        if let Some((encoded, mime_type)) = &options.image {
+            // 分支一： 图像字节内嵌在BIN 里 -> 走 convert_terxture 的
+            // gltf::image::Source::View 路径， PNG/JPEG 都会真正解码
+
+            let view = push_view(&mut bin, &mut buffer_views, encoded);
+            images.push(json!({ "bufferView":view, "mimeType": mime_type }));
+            textures.push(json!({ "source": 0 }));
+            material["pbrMetallicRoughness"]["baseColorTexture"] = json!({ "index": 0 });
+        } else if let Some(uri) = options.image_uri {
+            // 分支二：URI 引用外部文件 -> 应被拒绝（ExternalTextureSource）。
+            // mimeType 随便写，代码在读字节之前就该报错
+            images.push(json!({ "uri": uri, "mimeType": "image/png" }));
+            textures.push(json!({ "source": 0 }));
+            material["pbrMetallicRoughness"]["baseColorTexture"] = json!({ "index": 0 });
+        }
+
+        // ---- 根 JSON 组装：能被 Gltf::from_slice 接受的最小文档 ----
+        let mut root = Map::new();
+        root.insert("asset".to_owned(), json!({ "version": "2.0" }));
+        root.insert("scene".to_owned(), json!(0));
+        root.insert("scenes".to_owned(), json!([{ "nodes": [0] }]));
+        root.insert(
+            "nodes".to_owned(),
+            json!([{ "mesh": 0, "name": "Triangle" }]),
+        );
+        root.insert(
+            "meshes".to_owned(),
+            json!([{
+                "primitives": [{
+                    "attributes": attributes,
+                    "indices": indices_accessor,
+                    "material": 0,
+                }],
+            }]),
+        );
+        root.insert("accessors".to_owned(), Value::Array(accessors));
+        root.insert("bufferViews".to_owned(), Value::Array(buffer_views));
+        // BIN chunk 无 uri 的 buffer 就是它；byteLength 与 bin 字节数一致
+        root.insert("buffers".to_owned(), json!([{ "byteLength": bin.len() }]));
+        root.insert("materials".to_owned(), Value::Array(vec![material]));
+        if !images.is_empty() {
+            root.insert("images".to_owned(), Value::Array(images));
+            root.insert("textures".to_owned(), Value::Array(textures));
+        }
+
+        pack_glb(&Value::Object(root), &bin)
+    }
+
+    fn push_view(bin: &mut Vec<u8>, views: &mut Vec<Value>, bytes: &[u8]) -> usize {
+        let offset = bin.len();
+        bin.extend_from_slice(bytes);
+
+        // GLB 的 BIN chunk 必须 4 字节对齐；如果不是，则填充 0。
+        while !bin.len().is_multiple_of(4) {
+            bin.push(0);
+        }
+
+        views.push(json!({
+            "buffer": 0,
+            "byteOffset": offset,
+            "byteLength": bytes.len()
+        }));
+        views.len() - 1
+    }
+
+    fn flatten_f32_3(values: &[[f32; 3]]) -> Vec<u8> {
+        values
+            .iter()
+            .flat_map(|v| v.iter().copied().flat_map(f32::to_le_bytes))
+            .collect()
+    }
+
+    fn flatten_f32_2(values: &[[f32; 2]]) -> Vec<u8> {
+        values
+            .iter()
+            .flat_map(|v| v.iter().copied().flat_map(f32::to_le_bytes))
+            .collect()
+    }
+
+    fn flatten_u32(values: &[u32]) -> Vec<u8> {
+        values.iter().flat_map(|v| v.to_le_bytes()).collect()
+    }
+
+    fn encode_png(width: u32, height: u32, color: png::ColorType, pixels: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
+            encoder.set_color(color);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(pixels).unwrap();
+        }
+        bytes
+    }
+
+    fn encode_jpeg(width: usize, height: usize, rgb: &[u8]) -> Vec<u8> {
+        libjpeg_turbo_rs::compress(
+            rgb,
+            width,
+            height,
+            libjpeg_turbo_rs::PixelFormat::Rgb,
+            95,
+            libjpeg_turbo_rs::Subsampling::S444,
+        )
+        .unwrap()
+    }
+
+    /// 把 glTF JSON 和 BIN 数据打包成合法的 GLB 二进制。
+    ///
+    /// GLB 布局（所有 u32 均为小端）：
+    ///   [ 0..12 ] 文件头：magic "glTF" + version=2 + 文件总字节数
+    ///   [12..20 ] JSON chunk 头：chunk 长度 + 类型 0x4E4F534A（磁盘上是 "JSON"）
+    ///   [20..   ] JSON 字节，用空格 0x20 补齐到 4 的倍数
+    ///   [  ..   ] BIN chunk 头：chunk 长度 + 类型 0x004E4942（磁盘上是 "BIN\0"）
+    ///   [  ..   ] BIN 字节，用 0x00 补齐到 4 的倍数
+    ///
+    /// 两个 chunk 头里的“长度”都指补齐后的长度（含填充），这样总长度才能对账。
+    fn pack_glb(root: &Value, bin: &[u8]) -> Vec<u8> {
+        let mut json_bytes = serde_json::to_vec(root).unwrap();
+        while !json_bytes.len().is_multiple_of(4) {
+            json_bytes.push(b' ');
+        }
+
+        let mut bin_chunk = bin.to_vec();
+        while !bin_chunk.len().is_multiple_of(4) {
+            bin_chunk.push(0);
+        }
+
+        let json_len = u32::try_from(json_bytes.len()).unwrap();
+        let bin_len = u32::try_from(bin_chunk.len()).unwrap();
+        let total = 12 + 8 + json_len + 8 + bin_len;
+
+        let mut glb = Vec::with_capacity(total as usize);
+
+        glb.extend_from_slice(b"glTF");
+        glb.extend_from_slice(&2u32.to_le_bytes());
+        glb.extend_from_slice(&total.to_le_bytes());
+
+        glb.extend_from_slice(&json_len.to_le_bytes());
+        // 0x4E4F534A : "JSON"
+        glb.extend_from_slice(&0x4E4F_534A_u32.to_le_bytes());
+        glb.extend_from_slice(&json_bytes);
+
+        glb.extend_from_slice(&bin_len.to_le_bytes());
+        // 0x004E4942 : "BIN\0"
+        glb.extend_from_slice(&0x004E_4942_u32.to_le_bytes());
+        glb.extend_from_slice(&bin_chunk);
+
+        glb
+    }
 
     #[test]
     fn parses_box_mesh_primitive() -> Result<(), ParseError> {
@@ -540,5 +800,205 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn parses_fixture_with_default_attributes() -> Result<(), ParseError> {
+        let document = parse_asset_document(&build_glb(&default_options()))?;
+
+        let Some(primitive) = document
+            .mesh(MeshId::from_index(0))
+            .and_then(|mesh| mesh.primitives.first())
+        else {
+            unreachable!("fixture always contains one primitive");
+        };
+
+        // f32 -> LE 字节 -> f32 是无损往返，可以精确断言
+        assert_eq!(
+            primitive.geometry.uvs.as_deref(),
+            Some(DEFAULT_UVS.as_slice()),
+            "fixture should preserve default UVs"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_fixture_without_optional_attributes() -> Result<(), ParseError> {
+        let document = parse_asset_document(&build_glb(&FixtureOptions::default()))?;
+
+        // 首个 primitive 的两个可选属性各自的缺失标志
+        let attribtues = document
+            .mesh(MeshId::from_index(0))
+            .and_then(|mesh| mesh.primitives.first())
+            .map(|primitive| {
+                (
+                    primitive.geometry.normals.is_none(),
+                    primitive.geometry.uvs.is_none(),
+                )
+            });
+
+        assert_eq!(
+            attribtues,
+            Some((true, true)),
+            "missing optional attributes should stay None, not error"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_uv_count_mismatch() {
+        let options = FixtureOptions {
+            uv_values: vec![[0.5, 0.5]],
+            ..default_options()
+        };
+
+        let result = parse_asset_document(&build_glb(&options));
+
+        assert!(
+            matches!(
+                result,
+                Err(ParseError(ParseErrorKind::AttributeCountMismatch {
+                    attribute: "TEXCOORD_0"
+                })),
+            ),
+            "UV count mismatch should be rejected as AttributeCountMismatch"
+        );
+    }
+
+    #[test]
+    fn parses_embedded_png_base_color_texture() -> Result<(), ParseError> {
+        // 2x2 像素，四角四色，像素值可以精确断言（PNG 无损）
+        let pixels: [u8; 16] = [
+            255, 0, 0, 255, // 红
+            0, 255, 0, 255, // 绿
+            0, 0, 255, 255, // 蓝
+            255, 255, 0, 255, // 黄
+        ];
+        let options = FixtureOptions {
+            image: Some((encode_png(2, 2, png::ColorType::Rgba, &pixels), "image/png")),
+            ..default_options()
+        };
+
+        let document = parse_asset_document(&build_glb(&options))?;
+
+        let texture = document
+            .texture(TextureId::from_index(0))
+            .map(|texture| (texture.width, texture.height, texture.rgba8.as_slice()));
+
+        assert_eq!(
+            texture,
+            Some((2, 2, pixels.as_slice())),
+            "embedded RGBA PNG should decode to exact RGBA8 texels"
+        );
+
+        // 材质 -> 纹理的引用链：M2-002 的关键闭环
+        let material_texture = document
+            .material(MaterialId::from_index(0))
+            .and_then(|material| material.base_color_texture);
+
+        assert_eq!(
+            material_texture,
+            Some(TextureId::from_index(0)),
+            "material should reference the decoded texture"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn expands_rgb_and_grayscale_png_to_rgba8() -> Result<(), ParseError> {
+        // 3x1 的 RGB 和灰度 PNG，覆盖 expand_to_rgba8 的 Rgb/Grayscale 两个分支
+        // （Rgba 分支由上一个测试覆盖）
+        let rgb: [u8; 9] = [255, 0, 0, 0, 255, 0, 0, 0, 255];
+        let gray: [u8; 3] = [0, 128, 255];
+
+        let cases: [(png::ColorType, &[u8], Vec<u8>); 2] = [
+            (
+                png::ColorType::Rgb,
+                &rgb,
+                vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255],
+            ),
+            (
+                png::ColorType::Grayscale,
+                &gray,
+                vec![0, 0, 0, 255, 128, 128, 128, 255, 255, 255, 255, 255],
+            ),
+        ];
+
+        for (color, encoded_pixels, expected_rgba8) in cases {
+            let options = FixtureOptions {
+                image: Some((encode_png(3, 1, color, encoded_pixels), "image/png")),
+                ..default_options()
+            };
+            let document = parse_asset_document(&build_glb(&options))?;
+
+            let rgba8 = document
+                .texture(TextureId::from_index(0))
+                .map(|texture| texture.rgba8.as_slice());
+
+            assert_eq!(
+                rgba8,
+                Some(expected_rgba8.as_slice()),
+                "{color:?} PNG should expand to RGBA8"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_embedded_jpeg_base_color_texture() -> Result<(), ParseError> {
+        // 均匀灰色块：对任何子采样/量化都稳定。JPEG 无 alpha，
+        // 解码端应输出 alpha=255 的 RGBA8
+        let (width, height) = (4usize, 4usize);
+        let rgb = vec![128u8; width * height * 3];
+
+        let options = FixtureOptions {
+            image: Some((encode_jpeg(width, height, &rgb), "image/jpeg")),
+            ..default_options()
+        };
+
+        let document = parse_asset_document(&build_glb(&options))?;
+
+        let texture_info = document
+            .texture(TextureId::from_index(0))
+            .map(|texture| (texture.width, texture.height, texture.rgba8.len()));
+
+        assert_eq!(
+            texture_info,
+            Some((4, 4, 64)),
+            "JPEG should decode to its declared dimensions in RGBA8"
+        );
+
+        let alpha_filled = document
+            .texture(TextureId::from_index(0))
+            .is_some_and(|texture| texture.rgba8.chunks_exact(4).all(|px| px[3] == 255));
+
+        assert!(
+            alpha_filled,
+            "JPEG has no alpha channel; the decoder should fill 255"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_external_texture_uri() {
+        let options = FixtureOptions {
+            image_uri: Some("external.png"),
+            ..default_options()
+        };
+
+        let result = parse_asset_document(&build_glb(&options));
+
+        assert!(
+            matches!(
+                result,
+                Err(ParseError(ParseErrorKind::ExternalTextureSource))
+            ),
+            "URI image sources should be rejected before any byte access"
+        );
     }
 }

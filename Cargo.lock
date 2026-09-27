@@ -1635,6 +1635,7 @@ dependencies = [
  "libjpeg-turbo-rs",
  "png 0.18.1",
  "scenescope-core",
+ "serde_json",
  "thiserror 2.0.19",
 ]
 
