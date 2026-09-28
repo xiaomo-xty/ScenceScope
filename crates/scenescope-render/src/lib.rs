@@ -19,3 +19,9 @@ pub use gpu::GpuState;
     reason = "Vertex types are crate-visible to the sibling GPU module while this module remains private."
 )]
 mod vertex;
+
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "Mesh buffers are crate-visible to the sibling GPU module while the mesh module remains private."
+)]
+mod mesh;

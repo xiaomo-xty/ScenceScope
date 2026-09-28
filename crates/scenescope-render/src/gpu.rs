@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Ok};
 use glam::Mat4;
-use scenescope_core::{MeshData, MeshInstance};
+use scenescope_core::MeshInstance;
 use wgpu::{
     PipelineCompilationOptions, PipelineLayoutDescriptor, RenderPipelineDescriptor,
     RequestAdapterOptions, ShaderModuleDescriptor, VertexState, util::DeviceExt,
@@ -13,6 +13,7 @@ use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{
     camera::{CameraBinding, OrbitCamera, aspect_ratio},
+    mesh::MeshBuffers,
     vertex::Vertex,
 };
 
@@ -37,29 +38,6 @@ impl ObjectUniform {
             normal_matrix: normal_matrix.to_cols_array_2d(),
         })
     }
-}
-
-fn vertices_from_mesh(mesh: &MeshData) -> anyhow::Result<Vec<Vertex>> {
-    let Some(normals) = mesh.normals.as_deref() else {
-        return Ok(mesh
-            .positions
-            .iter()
-            .copied()
-            .map(Vertex::from_position)
-            .collect());
-    };
-
-    if mesh.positions.len() != normals.len() {
-        anyhow::bail!("mesh position and normal counts do not match");
-    }
-
-    Ok(mesh
-        .positions
-        .iter()
-        .copied()
-        .zip(normals.iter().copied())
-        .map(|(position, normal)| Vertex::from_position_and_normal(position, normal))
-        .collect())
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
@@ -135,45 +113,6 @@ fn create_render_pipeline(
     })
 }
 
-fn create_object_binding(
-    device: &wgpu::Device,
-    world_transform: &[[f32; 4]; 4],
-) -> anyhow::Result<(wgpu::BindGroupLayout, wgpu::BindGroup)> {
-    // =============================== obejct uniform ===========================================
-    let object_uniform = ObjectUniform::new(world_transform)?;
-
-    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("SceneScop object uniform buffer"),
-        contents: bytemuck::bytes_of(&object_uniform),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-
-    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("SceneScope object bind group layout"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-    });
-
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("SceneScope obejct bind group"),
-        layout: &layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: buffer.as_entire_binding(),
-        }],
-    });
-
-    Ok((layout, bind_group))
-}
-
 /// Owns the GPU resources used to render one mesh instance to a window surface
 #[derive(Debug)]
 pub struct GpuState {
@@ -187,15 +126,12 @@ pub struct GpuState {
 
     render_pipeline: wgpu::RenderPipeline,
 
-    vertex_buffer: wgpu::Buffer,
-    // vertex_count: u32,
-    index_buffer: wgpu::Buffer,
-    index_count: u32,
+    mesh_buffers: MeshBuffers,
 
     camera: OrbitCamera,
     camera_binding: CameraBinding,
 
-    object_bind_group: wgpu::BindGroup,
+    object_binding: ObjectBinding,
 
     depth_view: wgpu::TextureView,
     // config: wgpu::SurfaceConfiguration,
@@ -260,42 +196,24 @@ impl GpuState {
             source: wgpu::ShaderSource::Wgsl(include_str!("./shaders/hello.wgsl").into()),
         });
 
-        let vertices: Vec<Vertex> = vertices_from_mesh(&mesh_instance.mesh)?;
-
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("SceneScope vertex buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("SceneScope index buffer"),
-            contents: bytemuck::cast_slice(&mesh_instance.mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
         let camera = OrbitCamera::new(aspect_ratio(size));
         let camera_binding = CameraBinding::new(&device, &camera);
 
-        let (object_bind_group_layout, object_bind_group) =
-            create_object_binding(&device, &mesh_instance.world_transform)?;
-
-        // let vertex_count =
-        //     u32::try_from(QUAD_VERTICES.len()).context("triangle vertex count exceeds u32")?;
-        let index_count = u32::try_from(mesh_instance.mesh.indices.len())
-            .context("triangle vertex count exceeds u32")?;
+        let object_binding = ObjectBinding::new(&device, &mesh_instance.world_transform)?;
 
         let render_pipeline = create_render_pipeline(
             &device,
             &shader_model,
             surface_view_format,
             camera_binding.layout(),
-            &object_bind_group_layout,
+            object_binding.layout(),
         );
 
         let depth_view = create_depth_view(&device, size);
 
         let surface_state = SurfaceState::Configured;
+
+        let mesh_buffers = MeshBuffers::new(&device, mesh_instance)?;
 
         Ok(Self {
             device,
@@ -306,16 +224,13 @@ impl GpuState {
             surface_view_format,
             render_pipeline,
 
-            vertex_buffer,
-            // vertex_count,
-            index_buffer,
-            index_count,
+            mesh_buffers,
 
             camera,
             camera_binding,
 
             // object_buffer,
-            object_bind_group,
+            object_binding,
 
             depth_view,
         })
@@ -403,20 +318,22 @@ impl GpuState {
                 render_pass.set_pipeline(&self.render_pipeline);
 
                 render_pass.set_bind_group(0, self.camera_binding.bind_group(), &[]);
-                render_pass.set_bind_group(1, &self.object_bind_group, &[]);
+                render_pass.set_bind_group(1, &self.object_binding.bind_group, &[]);
 
                 render_pass.set_vertex_buffer(
                     // the slot response to  buffers of VertexState in `render_pipeline`
                     0,
-                    self.vertex_buffer.slice(..),
+                    self.mesh_buffers.vertex_buffer.slice(..),
                 );
 
-                render_pass
-                    .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.set_index_buffer(
+                    self.mesh_buffers.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
 
                 // render_pass.draw(0..self.vertex_count,  0..1);
 
-                render_pass.draw_indexed(0..self.index_count, 0, 0..1);
+                render_pass.draw_indexed(0..self.mesh_buffers.index_count, 0, 0..1);
             }
             self.queue.submit([encoder.finish()]);
         }
@@ -493,6 +410,31 @@ impl GpuState {
         self.camera_binding
             .update_uniform(&self.queue, &self.camera);
     }
+
+    /// Replaces the currently rendered mesh instance.
+    ///
+    /// New vertex and index buffers are uploaded for the mesh geometry, and the
+    /// object uniform (model and normal matrices) is written to its buffer
+    /// immediately. The render pipeline, surface configuration, and orbit camera
+    /// are left unchanged; the caller controls framing for the new model.
+    ///
+    /// Replacement is atomic: every fallible step runs before any state is
+    /// swapped, so a failed call leaves the previously loaded mesh on screen.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// - position and normal counts do not match;
+    /// - the mesh world transform is not invertible;
+    /// - the index count cannot be represented as `u32`.
+    pub fn set_mesh(&mut self, mesh_instance: &MeshInstance) -> anyhow::Result<()> {
+        let new_buffers = MeshBuffers::new(&self.device, mesh_instance)?;
+        self.object_binding
+            .update(&self.queue, &mesh_instance.world_transform)?;
+        self.mesh_buffers = new_buffers;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -521,4 +463,63 @@ fn configure_srgb_surface_view(
     }
 
     Ok(view_format)
+}
+
+#[derive(Debug)]
+struct ObjectBinding {
+    layout: wgpu::BindGroupLayout,
+    bind_group: wgpu::BindGroup,
+    uniform_buffer: wgpu::Buffer,
+}
+
+impl ObjectBinding {
+    fn new(device: &wgpu::Device, world_transform: &[[f32; 4]; 4]) -> anyhow::Result<Self> {
+        // =============================== obejct uniform ===========================================
+        let object_uniform = ObjectUniform::new(world_transform)?;
+
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("SceneScop object uniform buffer"),
+            contents: bytemuck::bytes_of(&object_uniform),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("SceneScope object bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("SceneScope obejct bind group"),
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+
+        Ok(Self {
+            layout,
+            bind_group,
+            uniform_buffer: buffer,
+        })
+    }
+
+    fn update(&self, queue: &wgpu::Queue, world_transform: &[[f32; 4]; 4]) -> anyhow::Result<()> {
+        let uniform = ObjectUniform::new(world_transform)?; // inveribale matrix -> Err
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
+        Ok(())
+    }
+
+    const fn layout(&self) -> &wgpu::BindGroupLayout {
+        &self.layout
+    }
 }
