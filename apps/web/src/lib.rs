@@ -1,21 +1,34 @@
+#![cfg_attr(not(debug_assertions), deny(warnings))]
+
 //! Browser entry point for `SceneScope`.
 #[cfg(target_arch = "wasm32")]
 mod browser {
     use std::{fmt::Display, sync::Arc};
 
+    use scenescope_core::asset::AssetDocument;
     use scenescope_render::GpuState;
     use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
     use winit::{
         application::ApplicationHandler,
         dpi::PhysicalPosition,
-        event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
+        event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
         event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
+        keyboard::Key,
         platform::web::{EventLoopExtWebSys, WindowAttributesExtWebSys},
         window::{Window, WindowId},
     };
 
     enum UserEvent {
-        GpuInitialized(Result<GpuState, String>),
+        GpuInitialized(Result<Box<(GpuState, AssetDocument)>, String>),
+        AssetPicked(AssetPick),
+    }
+
+    /// Outcome of one file-dialog interaction.
+    enum AssetPick {
+        /// The user picked a file; its bytes have already been read.
+        Picked(Vec<u8>),
+        /// The user dismissed the dialog.
+        Cancelled,
     }
 
     enum RendererState {
@@ -35,6 +48,7 @@ mod browser {
     }
 
     struct App {
+        document: Option<AssetDocument>,
         window: Option<Arc<Window>>,
         proxy: EventLoopProxy<UserEvent>,
         renderer: RendererState,
@@ -44,6 +58,7 @@ mod browser {
     impl App {
         const fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
             Self {
+                document: None,
                 proxy,
                 window: None,
                 renderer: RendererState::WaitingForSize,
@@ -72,12 +87,92 @@ mod browser {
 
             // send a initialized signal to UserEvent
             wasm_bindgen_futures::spawn_local(async move {
-                let result = initialize_gpu(window).await;
+                let result = initialize_gpu(window)
+                    .await
+                    .map(|(gpu, document)| Box::new((gpu, document)));
 
                 if let Err(error) = proxy.send_event(UserEvent::GpuInitialized(result)) {
                     web_sys::console::error_1(&js_error(&error));
                 }
             });
+        }
+
+        fn handle_key_input(&self, event: &KeyEvent) {
+            if event.state != ElementState::Pressed || event.repeat {
+                return;
+            }
+
+            let Key::Character(character) = event.logical_key.as_ref() else {
+                return;
+            };
+
+            if character.eq_ignore_ascii_case("o") {
+                self.begin_asset_pick();
+            }
+        }
+
+        /// Opens the browser file dialog; the async block captures only the proxy.
+        fn begin_asset_pick(&self) {
+            let proxy = self.proxy.clone();
+
+            wasm_bindgen_futures::spawn_local(async move {
+                let picked = rfd::AsyncFileDialog::new()
+                    .set_title("SceneScope: open a GLB")
+                    .add_filter("glTF Binary", &["glb"])
+                    .pick_file()
+                    .await;
+
+                let outcome = match picked {
+                    Some(file) => AssetPick::Picked(file.read().await),
+                    None => AssetPick::Cancelled,
+                };
+
+                if let Err(error) = proxy.send_event(UserEvent::AssetPicked(outcome)) {
+                    web_sys::console::error_1(&js_error(&error));
+                }
+            });
+        }
+
+        /// Loads the picked asset, keeping the current one on screen when anything fails.
+        ///
+        /// Cancelling is not an error: it simply leaves the current asset untouched.
+        fn handle_asset_pick(&mut self, pick: AssetPick) {
+            let bytes = match pick {
+                AssetPick::Picked(bytes) => bytes,
+                AssetPick::Cancelled => return,
+            };
+
+            let document = match scenescope_gltf::parse_asset_document(&bytes) {
+                Ok(document) => document,
+                Err(error) => {
+                    web_sys::console::error_1(&js_error(&format!(
+                        "failed to parse the picked asset: {error}"
+                    )));
+                    return;
+                }
+            };
+
+            let instances = document.mesh_instances();
+            let Some(instance) = instances.first().copied() else {
+                web_sys::console::error_1(&JsValue::from_str(
+                    "the picked asset contains no renderable mesh instance",
+                ));
+                return;
+            };
+
+            let RendererState::Ready(gpu) = &mut self.renderer else {
+                return web_sys::console::error_1(&JsValue::from_str(
+                    "GPU state is not initialized",
+                ));
+            };
+
+            if let Err(error) = gpu.set_mesh(instance) {
+                return web_sys::console::error_1(&js_error(&format!(
+                    "failed to upload the picked asset: {error}"
+                )));
+            }
+
+            self.document = Some(document);
         }
 
         fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) {
@@ -130,7 +225,12 @@ mod browser {
         }
     }
 
-    async fn initialize_gpu(window: Arc<Window>) -> Result<GpuState, String> {
+    #[expect(
+        clippy::future_not_send,
+        reason = "wasm is single-threaded and spawn_local drives this future; the surface \
+                  holds browser handles that are deliberately not Send"
+    )]
+    async fn initialize_gpu(window: Arc<Window>) -> Result<(GpuState, AssetDocument), String> {
         let document =
             scenescope_gltf::parse_asset_document(include_bytes!("../../../assets/test/Box.glb"))
                 .map_err(|error| error.to_string())?;
@@ -142,9 +242,11 @@ mod browser {
             .copied()
             .ok_or_else(|| "asset contains no renderable mesh instance".to_owned())?;
 
-        GpuState::new(window, instance)
+        let gpu = GpuState::new(window, instance)
             .await
-            .map_err(|error| format!("{error:#}"))
+            .map_err(|error| format!("{error:#}"))?;
+
+        Ok((gpu, document))
     }
 
     impl ApplicationHandler<UserEvent> for App {
@@ -171,7 +273,8 @@ mod browser {
 
         fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
             match event {
-                UserEvent::GpuInitialized(Ok(mut gpu)) => {
+                UserEvent::GpuInitialized(Ok(initialized)) => {
+                    let (mut gpu, document) = *initialized;
                     let Some(window) = self.window.as_ref() else {
                         self.renderer = RendererState::Failed;
                         event_loop.exit();
@@ -181,6 +284,7 @@ mod browser {
                     let size = window.inner_size();
                     gpu.resize(size);
 
+                    self.document = Some(document);
                     self.renderer = RendererState::Ready(Box::new(gpu));
 
                     if size.width > 0 && size.height > 0 {
@@ -191,6 +295,7 @@ mod browser {
                     web_sys::console::error_1(&JsValue::from_str(&error));
                     event_loop.exit();
                 }
+                UserEvent::AssetPicked(pick) => self.handle_asset_pick(pick),
             }
         }
         fn window_event(
@@ -236,6 +341,10 @@ mod browser {
                             window.request_redraw();
                         }
                     }
+                }
+
+                WindowEvent::KeyboardInput { event, .. } => {
+                    self.handle_key_input(&event);
                 }
 
                 WindowEvent::MouseInput { state, button, .. } => {

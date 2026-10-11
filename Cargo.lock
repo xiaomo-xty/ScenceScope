@@ -1706,6 +1706,7 @@ name = "scenescope-web"
 version = "0.1.0"
 dependencies = [
  "rfd",
+ "scenescope-core",
  "scenescope-gltf",
  "scenescope-render",
  "wasm-bindgen",
