@@ -24,7 +24,7 @@
 cargo run -p scenescope-desktop
 ```
 
-程序会加载仓库固定的 `assets/test/Box.glb`。按住鼠标左键拖动可环绕模型，使用滚轮缩放。
+程序会加载仓库固定的 `assets/test/Box.glb`，按 **O** 可通过原生文件对话框打开任意本地 `.glb`。按住鼠标左键拖动可环绕模型，使用滚轮缩放。
 
 ### Web 端
 
@@ -35,7 +35,7 @@ wasm-pack build apps/web --target web --dev
 python -m http.server 8080 --directory apps/web
 ```
 
-然后访问 <http://127.0.0.1:8080/>。Web 端与桌面端使用同一份 `MeshInstance`、渲染器和相机逻辑。
+然后访问 <http://127.0.0.1:8080/>。Web 端与桌面端使用同一份 `MeshInstance`、渲染器和相机逻辑；点击画布后用 **O** 打开浏览器文件选择器。
 
 ## 当前能力
 
@@ -43,7 +43,8 @@ python -m http.server 8080 --directory apps/web
 - 提取 `POSITION`、可选 `NORMAL`、可选 `TEXCOORD_0`、`u32` 索引、对象名称和节点 TRS 变换。
 - 解码内嵌 Base Color 纹理（PNG/JPEG 统一为 RGBA8），并保留材质到纹理的引用。
 - 解析失败返回分类错误：非 GLB、外部 buffer/纹理、属性数量不匹配、不支持的图像格式等。
-- 使用共享 `wgpu` 渲染器在 Windows 与 Web 中显示固定 `Box.glb`。
+- 使用共享 `wgpu` 渲染器在 Windows 与 Web 中显示资产；启动加载内嵌 `Box.glb`，按 **O** 可通过文件对话框打开本地 `.glb`。
+- 运行时换资产：成功则替换几何与世界变换并保留相机视角；解析或上传失败、以及取消选择时，当前画面保持不变且不产生误导性诊断。
 - 支持深度测试、背面剔除、Lambert 漫反射、轨道相机和滚轮缩放。
 - 使用 sRGB Surface View 保持桌面端与 Web 端的颜色输出语义一致。
 - 自动化测试覆盖 Box 回归（24 顶点、36 索引、法线、世界变换）和手写 GLB fixture（可选属性缺失、UV 数量不匹配、内嵌 PNG/JPEG 解码、外部纹理拒绝）。
@@ -103,8 +104,8 @@ docs                      # 产品、路线图、架构、ADR 和调试记录
 
 ## 当前限制
 
-- 当前入口只加载内嵌的 `Box.glb`，尚未支持本地文件选择。
-- 渲染路径仍只显示默认场景首个 mesh 节点的首个 indexed triangle primitive；解析侧已读取全部节点、mesh primitive、材质与纹理。
+- 尚未支持文件拖放（见 Backlog M2-006），每次打开本地文件需要通过 O 键重新选择。
+- 渲染器目前只绘制 `mesh_instances()` 返回的第一个实例；其余节点、mesh primitive、材质与纹理已解析并计入统计，但未绘制（见 M2-004）。
 - 渲染器尚未消费 UV 和 Base Color 纹理；材质信息目前只用于解析与统计。
 - 尚无场景摘要 UI、资产统计界面、检查规则、CLI 或 JSON 报告。
 - 不支持动画、蒙皮、Morph Target、Draco、KTX2、外部 buffer；纹理仅接受 BIN 内嵌的 PNG/JPEG。
@@ -116,6 +117,7 @@ docs                      # 产品、路线图、架构、ADR 和调试记录
 - Windows 入口目前使用持续重绘，静止时仍会占用额外 CPU/GPU 时间。
 - 加载或 GPU 初始化失败时尚无用户界面，Web 端错误只写入浏览器控制台。
 - 内嵌图像缺失 mimeType 时，`gltf` 依赖会在解析内部 panic；错误分类计划在 M2-005 处理。
+- Web 端滚轮缩放灵敏度明显高于桌面端：浏览器上报像素级 wheel delta（约 100/格），而相机缩放系数按「行」（1/格）标定，一格即接近最近或最远距离。修复计划见 Backlog M2-007。
 
 ## 文档索引
 

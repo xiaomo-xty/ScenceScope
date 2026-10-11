@@ -28,7 +28,7 @@ M0 和 M1 已关闭。M1 的可复现证据包括：
 |---|---|---|---|---|
 | M2-001 | P0 | 建立 v0.1 内部 `AssetDocument` 和资产统计 | Core 类型不依赖 glTF/wgpu；能够表达 v0.1 所需节点、mesh primitive、材质、纹理引用和确定性统计 | 完成 |
 | M2-002 | P0 | 扩展 GLB 转换与渲染输入 | 支持多个节点/mesh primitive、UV 和 Base Color 纹理；缺失可选属性有明确语义 | 完成 |
-| M2-003 | P0 | 接入 Windows/Web 本地文件选择 | 两端都以字节调用同一转换入口；取消选择不报错 | 就绪 |
+| M2-003 | P0 | 接入 Windows/Web 本地文件选择 | 两端都以字节调用同一转换入口；取消选择不报错 | 完成 |
 | M2-004 | P0 | 显示节点树、资源摘要和统计 | 用户可浏览节点、网格、材质、纹理及核心统计 | 待办 |
 | M2-005 | P0 | 分类加载错误并增加回归资产 | 损坏、空或不支持输入不崩溃；多个 Khronos 资产通过回归检查 | 待办 |
 
@@ -47,6 +47,16 @@ M2-003 的文件对话框选型已完成 spike 验证（2026-10-11，临时目�
 - Windows 原生编译通过，依赖仅 `windows-sys` / `raw-window-handle` / `log`；实测弹出原生对话框，选中 `Box.glb` 返回 1664 字节且魔数为 `glTF`，取消返回 `None`。
 - `cargo check --target wasm32-unknown-unknown` 与 `wasm-pack build --target web --dev` 全链路通过；浏览器实测返回 1664 字节，取消返回 `None`。
 - 已知约束：wasm 侧 `#[wasm_bindgen]` 的 async fn 需要 crate 直接依赖 `wasm-bindgen-futures`（Web 入口已有）；浏览器要求文件选择由用户手势触发；`FileHandle::path()` 在浏览器不存在，只能用 `read()`。
+
+M2-003 已完成（2026-10-11）。两端都用 `AsyncFileDialog` 打开本地 GLB，并以字节调用同一转换入口：
+
+- **Windows**：对话框在 worker 线程运行（模态对话框不占用 winit 事件循环），结果经 `EventLoopProxy<UserEvent>` 回传；用 `path()` + `std::fs::read` 读取以保留 IO 错误可见性（`FileHandle::read` 在 IO 失败时会 panic）。
+- **Web**：`spawn_local` 驱动对话框并 `read()` 取字节（浏览器无路径）；`initialize_gpu` 把 `AssetDocument` 与 `GpuState` 一起交还给 `App`，以满足 `spawn_local` 的 `'static` 约束。
+- **换资产**：`GpuState::set_mesh` 原子替换——所有可失败步骤完成后才更换状态，保留设备、管线、Surface 与相机；失败时旧资产留在屏幕上。
+- **取消语义**：取消返回 `None`，在两端都不产生任何诊断。
+- **验证**：桌面端与浏览器均实测加载 `CesiumMilkTruck.glb`（369,980 字节；Cesium / CC-BY-4.0，本地测试资产未入库）；非 GLB 输入在两端都保留当前画面并在 stderr / 控制台报错。过程中修复了对象 uniform buffer 缺少 `COPY_DST` 导致的 wgpu 校验 panic——该缺陷自 `set_mesh` 首次被真实调用才暴露。
+
+下一步：M2-004（节点树、资源摘要与统计界面）。渲染器目前只绘制第一个网格实例；`CesiumMilkTruck.glb` 有 2 个 mesh、4 个 primitive、5 个可达实例，因此只显示车身。
 
 ## 3. 里程碑
 
@@ -92,7 +102,7 @@ M2-003 的文件对话框选型已完成 spike 验证（2026-10-11，临时目�
 
 ### M4：工程化与发布
 
-- 建立格式化、静态检查、测试和多目标构建检查。
+- 建立格式化、静态检查、测试和多目标构建检查，且门禁覆盖每个受支持目标：host 的 fmt / clippy / test / release-check，以及 wasm32 目标的 check 与 clippy（`#[cfg(target_arch = "wasm32")]` 代码在 host 门禁下完全不可见，M2-003 收尾时曾因此一次性暴露 4 个未检查的警告）。
 - 对核心解析和规则执行建立 benchmark 基线。
 - 使用 CPU profiler 或 RenderDoc 完成一次有证据的分析。
 - 覆盖大文件、空场景、缺失属性和不支持扩展等失败路径。
@@ -119,10 +129,11 @@ M2-003 的文件对话框选型已完成 spike 验证（2026-10-11，临时目�
 | M1-004 | M1 | P0 | Web 第一帧并验证共享场景数据 | 完成 |
 | M2-001 | M2 | P0 | 内部 AssetDocument、节点树和统计 | 完成 |
 | M2-002 | M2 | P0 | 多节点/primitive、UV 和 Base Color 纹理 | 完成 |
-| M2-003 | M2 | P0 | Windows/Web 本地文件选择 | 就绪 |
+| M2-003 | M2 | P0 | Windows/Web 本地文件选择 | 完成 |
 | M2-004 | M2 | P0 | 节点树、资源摘要和统计界面 | 待办 |
 | M2-005 | M2 | P0 | 错误分类与多个 Khronos 回归资产 | 待办 |
 | M2-006 | M2 | P1 | Windows 文件拖放 | 待办 |
+| M2-007 | M2 | P1 | 统一桌面/Web 的滚轮缩放单位 | 待办 |
 | M3-001 | M3 | P0 | profile、diagnostic 和 5 条规则 | 待办 |
 | M3-002 | M3 | P0 | CLI JSON 和跨入口一致性 | 待办 |
 | M4-001 | M4 | P0 | CI 和多目标构建门禁 | 待办 |
