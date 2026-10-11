@@ -14,8 +14,11 @@ pub(crate) struct MeshBuffers {
     pub(crate) index_count: u32,
 }
 impl MeshBuffers {
-    pub(crate) fn new(device: &wgpu::Device, mesh_instance: &MeshInstance) -> anyhow::Result<Self> {
-        let vertices: Vec<Vertex> = vertices_from_mesh(&mesh_instance.mesh)?;
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        mesh_instance: MeshInstance<'_>,
+    ) -> anyhow::Result<Self> {
+        let vertices: Vec<Vertex> = vertices_from_mesh(mesh_instance.mesh)?;
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("SceneScope vertex buffer"),
@@ -29,8 +32,6 @@ impl MeshBuffers {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        // let vertex_count =
-        //     u32::try_from(QUAD_VERTICES.len()).context("triangle vertex count exceeds u32")?;
         let index_count = u32::try_from(mesh_instance.mesh.indices.len())
             .context("triangle vertex count exceeds u32")?;
 

@@ -152,7 +152,7 @@ impl GpuState {
     /// - position and normal counts do not match.
     /// - the mesh world transform is not invertible.
     /// - the index count cannot be represented as `u32`.
-    pub async fn new(window: Arc<Window>, mesh_instance: &MeshInstance) -> anyhow::Result<Self> {
+    pub async fn new(window: Arc<Window>, mesh_instance: MeshInstance<'_>) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
         if size.width == 0 || size.height == 0 {
@@ -410,31 +410,6 @@ impl GpuState {
         self.camera_binding
             .update_uniform(&self.queue, &self.camera);
     }
-
-    /// Replaces the currently rendered mesh instance.
-    ///
-    /// New vertex and index buffers are uploaded for the mesh geometry, and the
-    /// object uniform (model and normal matrices) is written to its buffer
-    /// immediately. The render pipeline, surface configuration, and orbit camera
-    /// are left unchanged; the caller controls framing for the new model.
-    ///
-    /// Replacement is atomic: every fallible step runs before any state is
-    /// swapped, so a failed call leaves the previously loaded mesh on screen.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    ///
-    /// - position and normal counts do not match;
-    /// - the mesh world transform is not invertible;
-    /// - the index count cannot be represented as `u32`.
-    pub fn set_mesh(&mut self, mesh_instance: &MeshInstance) -> anyhow::Result<()> {
-        let new_buffers = MeshBuffers::new(&self.device, mesh_instance)?;
-        self.object_binding
-            .update(&self.queue, &mesh_instance.world_transform)?;
-        self.mesh_buffers = new_buffers;
-        Ok(())
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -469,7 +444,6 @@ fn configure_srgb_surface_view(
 struct ObjectBinding {
     layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
-    uniform_buffer: wgpu::Buffer,
 }
 
 impl ObjectBinding {
@@ -509,14 +483,8 @@ impl ObjectBinding {
         Ok(Self {
             layout,
             bind_group,
-            uniform_buffer: buffer,
+            // uniform_buffer: buffer,
         })
-    }
-
-    fn update(&self, queue: &wgpu::Queue, world_transform: &[[f32; 4]; 4]) -> anyhow::Result<()> {
-        let uniform = ObjectUniform::new(world_transform)?; // inveribale matrix -> Err
-        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
-        Ok(())
     }
 
     const fn layout(&self) -> &wgpu::BindGroupLayout {

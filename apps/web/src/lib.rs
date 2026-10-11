@@ -131,12 +131,18 @@ mod browser {
     }
 
     async fn initialize_gpu(window: Arc<Window>) -> Result<GpuState, String> {
-        let mesh = scenescope_gltf::parse_first_mesh_primitive(include_bytes!(
-            "../../../assets/test/Box.glb"
-        ))
-        .map_err(|error| error.to_string())?;
+        let document =
+            scenescope_gltf::parse_asset_document(include_bytes!("../../../assets/test/Box.glb"))
+                .map_err(|error| error.to_string())?;
 
-        GpuState::new(window, &mesh)
+        let instances = document.mesh_instances();
+        // Temporary single-instance rendering: M2-004 renders every instance.
+        let instance = instances
+            .first()
+            .copied()
+            .ok_or_else(|| "asset contains no renderable mesh instance".to_owned())?;
+
+        GpuState::new(window, instance)
             .await
             .map_err(|error| format!("{error:#}"))
     }

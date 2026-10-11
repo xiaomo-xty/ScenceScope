@@ -4,11 +4,10 @@
 //!
 //!
 
-use glam::Mat4;
 use gltf::{Gltf, buffer::Source, mesh::Mode};
 use libjpeg_turbo_rs::{PixelFormat, decompress_to, load_png_from_bytes};
 use scenescope_core::{
-    MeshData, MeshInstance,
+    MeshData,
     asset::{
         AssetDocument, Material, MaterialId, Mesh, MeshId, MeshPrimitive, Node, NodeId,
         NodeTransform, Scene, SceneId, Texture, TextureId,
@@ -37,9 +36,6 @@ enum ParseErrorKind {
     #[error("binary glTF does not contain a BIN chunk")]
     MissingBinaryBlob,
 
-    #[error("binary glTF does not contain a mesh primitive")]
-    MissingMeshPrimitive,
-
     #[error("mesh primitive is not a triangle list")]
     UnsupportedPrimitiveMode,
 
@@ -48,12 +44,6 @@ enum ParseErrorKind {
 
     #[error("mesh primitive has no readable indices")]
     MissingIndices,
-
-    #[error("binary glTF does not contain a scene")]
-    MissingScene,
-
-    #[error("scene does not contain a mesh node")]
-    MissingMeshNode,
 
     #[error("texture images must be embedded in the GLB BIN chunk")]
     ExternalTextureSource,
@@ -69,22 +59,6 @@ enum ParseErrorKind {
 
     #[error("attribute {attribute} count does not match POSITION count")]
     AttributeCountMismatch { attribute: &'static str },
-}
-
-fn find_first_mesh_node<'a>(
-    node: &gltf::Node<'a>,
-    parent_world: Mat4,
-) -> Option<(gltf::Mesh<'a>, Mat4)> {
-    let local = Mat4::from_cols_array_2d(&node.transform().matrix());
-
-    let world = parent_world * local;
-
-    if let Some(mesh) = node.mesh() {
-        return Some((mesh, world));
-    }
-
-    node.children()
-        .find_map(|child| find_first_mesh_node(&child, world))
 }
 
 fn convert_scene(scene: &gltf::Scene<'_>) -> Scene {
@@ -322,91 +296,6 @@ pub fn parse_asset_document(bytes: &[u8]) -> Result<AssetDocument, ParseError> {
     })
 }
 
-/// Parses the first mesh primitive from a `GLB` byte slice.
-///
-/// # Errors
-///
-/// Returns an error when the input is invalid, requires external buffers,
-/// or does not contain a supported indexed triangle primitive.
-pub fn parse_first_mesh_primitive(bytes: &[u8]) -> Result<MeshInstance, ParseError> {
-    if !bytes.starts_with(GLB_MAGIC) {
-        return Err(ParseErrorKind::NotGlb.into());
-    }
-
-    let gltf = Gltf::from_slice(bytes).map_err(ParseErrorKind::InvalidGltf)?;
-
-    if gltf
-        .buffers()
-        .any(|buffer| matches!(buffer.source(), Source::Uri(_)))
-    {
-        return Err(ParseErrorKind::ExternalBuffer.into());
-    }
-
-    // let primitive = gltf
-    //     .meshes()
-    //     .next()
-    //     .and_then(|mesh| mesh.primitives().next())
-    //     .ok_or(ParseErrorKind::MissingMeshPrimitive)?;
-
-    let scene = gltf
-        .default_scene()
-        .or_else(|| gltf.scenes().next())
-        .ok_or(ParseErrorKind::MissingScene)?;
-
-    let (mesh, world_transform) = scene
-        .nodes()
-        .find_map(|node| find_first_mesh_node(&node, Mat4::IDENTITY))
-        .ok_or(ParseErrorKind::MissingMeshNode)?;
-
-    let primitive = mesh
-        .primitives()
-        .next()
-        .ok_or(ParseErrorKind::MissingMeshPrimitive)?;
-
-    if primitive.mode() != Mode::Triangles {
-        return Err(ParseErrorKind::UnsupportedPrimitiveMode.into());
-    }
-
-    let blob = gltf
-        .blob
-        .as_deref()
-        .ok_or(ParseErrorKind::MissingBinaryBlob)?;
-
-    let reader = primitive.reader(|buffer| match buffer.source() {
-        Source::Bin => Some(blob),
-        Source::Uri(_) => None,
-    });
-
-    let positions = reader
-        .read_positions()
-        .ok_or(ParseErrorKind::MissingPositions)?
-        .collect();
-
-    let indices = reader
-        .read_indices()
-        .ok_or(ParseErrorKind::MissingIndices)?
-        .into_u32()
-        .collect();
-
-    let normals = reader.read_normals().map(Iterator::collect);
-
-    let uvs = reader
-        .read_tex_coords(0)
-        .map(|coords| coords.into_f32().collect::<Vec<[f32; 2]>>());
-
-    let mesh = MeshData {
-        positions,
-        indices,
-        normals,
-        uvs,
-    };
-
-    Ok(MeshInstance {
-        mesh,
-        world_transform: world_transform.to_cols_array_2d(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -423,7 +312,7 @@ mod tests {
 
     use crate::parse_asset_document;
 
-    use super::{ParseError, ParseErrorKind, parse_first_mesh_primitive};
+    use super::{ParseError, ParseErrorKind};
 
     /// glTF accessor componentType；数值即 WebGL 枚举（0x1406 等），见规范 §accessors。
     const FLOAT: u32 = 5126;
@@ -676,8 +565,19 @@ mod tests {
         glb
     }
 
+    fn assert_matrix_close(actual: [[f32; 4]; 4], expected: [[f32; 4]; 4], epsilon: f32) {
+        for (actual_column, expected_column) in actual.iter().zip(expected.iter()) {
+            for (actual_value, expected_value) in actual_column.iter().zip(expected_column.iter()) {
+                assert!(
+                    (actual_value - expected_value).abs() <= epsilon,
+                    "actual value {actual_value} is not within {epsilon} of expected value {expected_value}"
+                );
+            }
+        }
+    }
+
     #[test]
-    fn parses_box_mesh_primitive() -> Result<(), ParseError> {
+    fn parse_box_world_transform() -> Result<(), ParseError> {
         const BOX_WORLD_TRANSFORM: [[f32; 4]; 4] = [
             [1.0, 0.0, 0.0, 0.0],
             [0.0, 0.0, -1.0, 0.0],
@@ -685,47 +585,18 @@ mod tests {
             [0.0, 0.0, 0.0, 1.0],
         ];
 
-        let instance = parse_first_mesh_primitive(BOX_GLB)?;
-        let mesh = &instance.mesh;
+        let document = parse_asset_document(BOX_GLB)?;
+        let instances = document.mesh_instances();
 
-        assert_eq!(
-            mesh.positions.len(),
-            24,
-            "Box.glb should contain 24 vertex positions"
-        );
-
-        assert_eq!(
-            mesh.indices.len(),
-            36,
-            "Box.glb should contain 36 vertex indices"
-        );
-
-        let position_count = mesh.positions.len();
-
-        assert!(
-            mesh.indices
-                .iter()
-                .all(|&index| { usize::try_from(index).is_ok_and(|index| index < position_count) }),
-            "every index should reference an existing vertex position",
-        );
-
-        assert_eq!(
-            mesh.normals.as_ref().map(Vec::len),
-            Some(mesh.positions.len()),
-            "Box.glb should provide one normal per vertex position"
-        );
-
-        assert_eq!(
-            instance.world_transform, BOX_WORLD_TRANSFORM,
-            "Box.glb should preserve its scene-node world transform"
-        );
+        assert_eq!(instances.len(), 1, "Box.glb yields one mesh instance");
+        assert_matrix_close(instances[0].world_transform, BOX_WORLD_TRANSFORM, 1e-5);
 
         Ok(())
     }
 
     #[test]
     fn rejects_non_glb_bytes() {
-        let result = parse_first_mesh_primitive(b"not a GLB file");
+        let result = parse_asset_document(b"not a GLB file");
 
         assert!(
             matches!(result, Err(ParseError(ParseErrorKind::NotGlb))),

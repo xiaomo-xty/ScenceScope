@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use scenescope_core::MeshInstance;
+use scenescope_core::asset::AssetDocument;
 use scenescope_render::GpuState;
 use winit::{
     application::ApplicationHandler,
@@ -17,7 +17,7 @@ use winit::{
 
 // #[derive(Default)]
 struct App {
-    mesh: MeshInstance,
+    document: AssetDocument,
     window: Option<Arc<Window>>,
     gpu: Option<GpuState>,
     orbit_gesture: OrbitGesture,
@@ -101,7 +101,17 @@ impl ApplicationHandler for App {
             Ok(window) => {
                 let window = Arc::new(window);
 
-                let gpu_result = pollster::block_on(GpuState::new(Arc::clone(&window), &self.mesh));
+                let instances = self.document.mesh_instances();
+                // Temporary single-instance rendering: M2-004 renders every instance.
+                let Some(instance) = instances.first().copied() else {
+                    self.fatal_error = Some(anyhow::anyhow!(
+                        "asset contains no renderable mesh instances"
+                    ));
+                    event_loop.exit();
+                    return;
+                };
+
+                let gpu_result = pollster::block_on(GpuState::new(Arc::clone(&window), instance));
 
                 match gpu_result {
                     Ok(gpu) => {
@@ -126,9 +136,9 @@ impl ApplicationHandler for App {
 }
 
 impl App {
-    const fn new(mesh: MeshInstance) -> Self {
+    const fn new(document: AssetDocument) -> Self {
         Self {
-            mesh,
+            document,
             window: None,
             gpu: None,
             orbit_gesture: OrbitGesture::Inactive,
@@ -205,12 +215,11 @@ impl App {
 pub fn run() -> anyhow::Result<()> {
     let event_loop = EventLoop::new().context("failed to create the desktop event loop")?;
 
-    // let mut app = App::default();
-    let mesh =
-        scenescope_gltf::parse_first_mesh_primitive(include_bytes!("../../../assets/test/Box.glb"))
+    let document =
+        scenescope_gltf::parse_asset_document(include_bytes!("../../../assets/test/Box.glb"))
             .context("failed to parse the embedded Box.glb")?;
 
-    let mut app = App::new(mesh);
+    let mut app = App::new(document);
 
     // using poll mode to avoid blocking the event loop, which is important for real-time applications
     event_loop.set_control_flow(ControlFlow::Poll);
