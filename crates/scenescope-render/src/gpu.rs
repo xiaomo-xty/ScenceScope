@@ -152,6 +152,14 @@ impl GpuState {
     /// - position and normal counts do not match.
     /// - the mesh world transform is not invertible.
     /// - the index count cannot be represented as `u32`.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        expect(
+            clippy::future_not_send,
+            reason = "wasm is single-threaded and spawn_local drives this future; the surface \
+                      holds browser handles that are deliberately not Send"
+        )
+    )]
     pub async fn new(window: Arc<Window>, mesh_instance: MeshInstance<'_>) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
