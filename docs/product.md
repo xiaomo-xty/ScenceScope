@@ -116,6 +116,8 @@ SceneScope 是基于 Rust 与 wgpu 的跨平台 3D 资产检查和验证工具�
 6. CLI 能输出符合当前 schema 的 JSON，解析失败与检查诊断可以区分。
 7. 格式、静态检查、测试和目标构建检查通过。
 8. 发布 Windows 程序、可访问的 Web Demo 和 `v0.1.0` 发布说明，明确列出限制。
+9. 节点树、资源摘要与统计可在界面中浏览，并与视口双向联动：选中节点高亮其全部实例，点击模型在树中定位，点击空白取消选中；选中状态同时以文本表达，不只依赖颜色。
+10. 材质以 metallic-roughness 单向光渲染：Base Color 纹理按 sRGB 采样、metallic/roughness 按线性采样，缺失纹理时回退到材质因子。
 
 ## 10. v0.1 不做
 
@@ -123,7 +125,7 @@ SceneScope 是基于 Rust 与 wgpu 的跨平台 3D 资产检查和验证工具�
 - 格式转换和 GLB 之外的模型格式。
 - 动画、骨骼、Morph Target 和物理。
 - Draco、KTX2 和完整 glTF 扩展支持。
-- 完整 PBR、阴影和高级后处理。
+- IBL/环境光照、阴影和高级后处理（v0.1 只做 metallic-roughness 单向光，见第 9 节第 10 条）。
 - 自研 ECS、完整游戏引擎或动态插件 ABI。
 - 云端账号、上传、协作和商业化系统。
 - 移动端和主机平台发布。
@@ -134,6 +136,8 @@ SceneScope 是基于 Rust 与 wgpu 的跨平台 3D 资产检查和验证工具�
 - M1 已根据首个转换测试选择 gltf 1.4 与 glam，第三方 glTF 类型被限制在 Adapter 内。
 - M2-002 已完成数据流与依赖决策：内嵌 PNG/JPEG 由 `libjpeg-turbo-rs` 0.8 解码为 RGBA8；`glam` 进入 Core 承担场景遍历与世界变换组合；渲染输入统一为 `AssetDocument`（见 [ADR-0003](adr/0003-asset-document-render-input.md)）。
 - M2-003 已选定本地文件选择依赖 `rfd` 0.17（MIT），两端统一使用 `AsyncFileDialog::pick_file()` + `FileHandle::read()`；选型经 Windows 原生与浏览器双端 spike 验证（记录见[路线图](roadmap.md)）。
-- M2 待节点树、资源摘要和统计的真实交互需求明确后再选择 GUI 框架。
+- M2-004 已选定界面方案：egui 0.36.2 经 `egui-winit` + `egui-wgpu` 集成进现有入口（不采用 eframe），界面独立为 `scenescope-ui` 并分视图模型层与 egui 渲染层（见 [ADR-0004](adr/0004-gui-framework-and-ui-layering.md)）。wgpu 30.0.0 与 winit 0.30.13 保持现状；三者版本相互绑定，跨大版本升级必须同步。
+- M2-004 已确定本地化与字体策略：字符串从首版起走查表（先英文），中英双语、系统语言检测与界面切换按钮归 M2-009；字体采用"桌面内嵌 + Web 运行时 fetch 自托管文件"，全量 Noto Sans SC 静态字体 8.45 MB、可变字体 16.95 MB。
+- M2-004 已确定材质范围：M2-010 先做材质可见（UV 与 Base Color 纹理采样），M2-011 做 metallic-roughness 单向光（PBR-lite）；IBL、阴影、法线贴图与后处理不做。
 - M3 将结合 GUI 与 CLI 两个消费者确定 profile 文件格式、报告 JSON 字段和退出码。
 - M4 将通过 benchmark 和 profiler 数据确定大文件、加载时间和内存目标。

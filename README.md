@@ -126,5 +126,6 @@ docs                      # 产品、路线图、架构、ADR 和调试记录
 - [ADR-0001：项目基线](docs/adr/0001-project-foundation.md)
 - [ADR-0002：跨平台颜色输出](docs/adr/0002-cross-platform-color-output.md)
 - [ADR-0003：资产文档作为唯一渲染输入](docs/adr/0003-asset-document-render-input.md)
+- [ADR-0004：GUI 框架与界面分层](docs/adr/0004-gui-framework-and-ui-layering.md)
 - [调试记录：Desktop/Web 色差](docs/debugging/0001-desktop-web-color-difference.md)
 - [glTF/GLB 格式布局图](docs/images/gltf-layout.svg)
