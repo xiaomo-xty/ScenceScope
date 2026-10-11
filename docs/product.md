@@ -132,6 +132,8 @@ SceneScope 是基于 Rust 与 wgpu 的跨平台 3D 资产检查和验证工具�
 
 - M0 已确认 Rust 1.87、wgpu 30、winit 0.30，并写入 workspace 与 lockfile。
 - M1 已根据首个转换测试选择 gltf 1.4 与 glam，第三方 glTF 类型被限制在 Adapter 内。
+- M2-002 已完成数据流与依赖决策：内嵌 PNG/JPEG 由 `libjpeg-turbo-rs` 0.8 解码为 RGBA8；`glam` 进入 Core 承担场景遍历与世界变换组合；渲染输入统一为 `AssetDocument`（见 [ADR-0003](adr/0003-asset-document-render-input.md)）。
+- M2-003 已选定本地文件选择依赖 `rfd` 0.17（MIT），两端统一使用 `AsyncFileDialog::pick_file()` + `FileHandle::read()`；选型经 Windows 原生与浏览器双端 spike 验证（记录见[路线图](roadmap.md)）。
 - M2 待节点树、资源摘要和统计的真实交互需求明确后再选择 GUI 框架。
 - M3 将结合 GUI 与 CLI 两个消费者确定 profile 文件格式、报告 JSON 字段和退出码。
 - M4 将通过 benchmark 和 profiler 数据确定大文件、加载时间和内存目标。

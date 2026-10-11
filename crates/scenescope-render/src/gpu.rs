@@ -236,6 +236,27 @@ impl GpuState {
         })
     }
 
+    /// Replaces the rendered mesh while keeping device, pipeline, surface, and camera.
+    ///
+    /// Every fallible step runs before any state is swapped, so a failed call
+    /// leaves the previously loaded mesh on screen. The caller controls framing:
+    /// the camera is not reframed for the new model.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// - position and normal counts do not match;
+    /// - the mesh world transform is not invertible;
+    /// - the index count cannot be represented as `u32`.
+    pub fn set_mesh(&mut self, mesh_instance: MeshInstance<'_>) -> anyhow::Result<()> {
+        let new_buffers = MeshBuffers::new(&self.device, mesh_instance)?;
+        self.object_binding
+            .update(&self.queue, &mesh_instance.world_transform)?;
+        self.mesh_buffers = new_buffers;
+        Ok(())
+    }
+
     /// Renders and presents one frame.
     ///
     /// Rendering is skipped while window has zero area or while the surface
@@ -444,6 +465,9 @@ fn configure_srgb_surface_view(
 struct ObjectBinding {
     layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
+
+    /// Kept so `update` can rewrite the transform without recreating the binding.
+    uniform_buffer: wgpu::Buffer,
 }
 
 impl ObjectBinding {
@@ -454,7 +478,7 @@ impl ObjectBinding {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("SceneScop object uniform buffer"),
             contents: bytemuck::bytes_of(&object_uniform),
-            usage: wgpu::BufferUsages::UNIFORM,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -483,11 +507,21 @@ impl ObjectBinding {
         Ok(Self {
             layout,
             bind_group,
-            // uniform_buffer: buffer,
+            uniform_buffer: buffer,
         })
     }
 
     const fn layout(&self) -> &wgpu::BindGroupLayout {
         &self.layout
+    }
+
+    /// Rewrites the object uniform for a new world transform.
+    ///
+    /// The uniform is computed before the buffer is touched, so a transform that
+    /// cannot be inverted leaves the previous contents intact.
+    fn update(&self, queue: &wgpu::Queue, world_transform: &[[f32; 4]; 4]) -> anyhow::Result<()> {
+        let uniform = ObjectUniform::new(world_transform)?;
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
+        Ok(())
     }
 }

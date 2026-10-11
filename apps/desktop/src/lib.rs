@@ -2,7 +2,7 @@
 
 //! Native desktop entry point for `SceneScope`.
 
-use std::sync::Arc;
+use std::{sync::Arc, thread};
 
 use anyhow::Context;
 use scenescope_core::asset::AssetDocument;
@@ -10,21 +10,23 @@ use scenescope_render::GpuState;
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalPosition,
-    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{self, ControlFlow, EventLoop},
+    event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
+    event_loop::{self, ControlFlow, EventLoop, EventLoopProxy},
+    keyboard::Key,
     window::Window,
 };
 
 // #[derive(Default)]
 struct App {
     document: AssetDocument,
+    proxy: EventLoopProxy<UserEvent>,
     window: Option<Arc<Window>>,
     gpu: Option<GpuState>,
     orbit_gesture: OrbitGesture,
     fatal_error: Option<anyhow::Error>,
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<UserEvent> for App {
     fn window_event(
         &mut self,
         event_loop: &event_loop::ActiveEventLoop,
@@ -67,6 +69,9 @@ impl ApplicationHandler for App {
                     }
                 }
             }
+            WindowEvent::KeyboardInput { event, .. } => {
+                self.handle_key_input(&event);
+            }
             WindowEvent::MouseInput { state, button, .. } => {
                 self.handle_mouse_input(state, button);
             }
@@ -82,6 +87,12 @@ impl ApplicationHandler for App {
                 self.orbit_gesture = OrbitGesture::Inactive;
             }
             _ => {}
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &event_loop::ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::AssetPicked(pick) => self.handle_asset_pick(pick),
         }
     }
 
@@ -136,9 +147,10 @@ impl ApplicationHandler for App {
 }
 
 impl App {
-    const fn new(document: AssetDocument) -> Self {
+    const fn new(document: AssetDocument, proxy: EventLoopProxy<UserEvent>) -> Self {
         Self {
             document,
+            proxy,
             window: None,
             gpu: None,
             orbit_gesture: OrbitGesture::Inactive,
@@ -154,6 +166,73 @@ impl App {
             anyhow::bail!("GPU state is not initialized");
         };
         gpu.render()
+    }
+
+    fn handle_key_input(&self, event: &KeyEvent) {
+        if event.state != ElementState::Pressed || event.repeat {
+            return;
+        }
+
+        let Key::Character(character) = event.logical_key.as_ref() else {
+            return;
+        };
+
+        if character.eq_ignore_ascii_case("o") {
+            self.begin_asset_pick();
+        }
+    }
+
+    /// Opens the file dialog on a worker thread so the event loop keeps running.
+    fn begin_asset_pick(&self) {
+        let proxy = self.proxy.clone();
+
+        thread::spawn(move || {
+            let outcome = pick_asset();
+
+            if let Err(error) = proxy.send_event(UserEvent::AssetPicked(outcome)) {
+                eprintln!("failed to report the picked asset: {error}");
+            }
+        });
+    }
+
+    /// Loads the picked asset, keeping the current one on screen when anything fails.
+    ///
+    /// Cancelling is not an error: it simply leaves the current asset untouched.
+    fn handle_asset_pick(&mut self, pick: AssetPick) {
+        let bytes = match pick {
+            AssetPick::Picked(bytes) => bytes,
+            AssetPick::Cancelled => return,
+            AssetPick::Failed(error) => {
+                eprintln!("asset pick failed: {error}");
+                return;
+            }
+        };
+
+        let document = match scenescope_gltf::parse_asset_document(&bytes) {
+            Ok(document) => document,
+            Err(error) => {
+                eprintln!("failed to parse the picked asset: {error}");
+                return;
+            }
+        };
+
+        let instances = document.mesh_instances();
+        let Some(instance) = instances.first().copied() else {
+            eprintln!("the picked asset contains no renderable mesh instance");
+            return;
+        };
+
+        let Some(gpu) = self.gpu.as_mut() else {
+            eprintln!("GPU state is not initialized");
+            return;
+        };
+
+        if let Err(error) = gpu.set_mesh(instance) {
+            eprintln!("failed to upload the picked asset: {error}");
+            return;
+        }
+
+        self.document = document;
     }
 
     fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) {
@@ -206,20 +285,48 @@ impl App {
     }
 }
 
-// Runs the native SceneScope desktop application.
+/// Runs the file dialog and reads the picked file on the calling thread.
+///
+/// `FileHandle::read` returns `Vec<u8>` and panics on IO errors, so the file is
+/// read through its path to keep the failure visible.
+fn pick_asset() -> AssetPick {
+    let Some(file) = pollster::block_on(
+        rfd::AsyncFileDialog::new()
+            .set_title("SceneScope: open a GLB")
+            .add_filter("glTF Binary", &["glb"])
+            .pick_file(),
+    ) else {
+        return AssetPick::Cancelled;
+    };
+
+    let path = file.path().to_path_buf();
+
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            println!("picked {}: {} bytes", file.file_name(), bytes.len());
+            AssetPick::Picked(bytes)
+        }
+        Err(error) => AssetPick::Failed(format!("failed to read {}: {error}", path.display())),
+    }
+}
+
+/// Runs the native `SceneScope` desktop application.
 ///
 /// # Errors
 ///
 /// Returns an error if the event loop cannot be created or run, or if
 /// window or GPU initialization fails.
 pub fn run() -> anyhow::Result<()> {
-    let event_loop = EventLoop::new().context("failed to create the desktop event loop")?;
+    let event_loop = EventLoop::<UserEvent>::with_user_event()
+        .build()
+        .context("failed to create the desktop event loop")?;
 
     let document =
         scenescope_gltf::parse_asset_document(include_bytes!("../../../assets/test/Box.glb"))
             .context("failed to parse the embedded Box.glb")?;
 
-    let mut app = App::new(document);
+    let proxy = event_loop.create_proxy();
+    let mut app = App::new(document, proxy);
 
     // using poll mode to avoid blocking the event loop, which is important for real-time applications
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -248,4 +355,19 @@ enum OrbitGesture {
     Inactive,
     Armed,
     Dragging { previous: PhysicalPosition<f32> },
+}
+
+/// Work completed off the event-loop thread.
+enum UserEvent {
+    AssetPicked(AssetPick),
+}
+
+/// Outcome of one file-dialog interaction.
+enum AssetPick {
+    /// The user picked a file; its bytes are already read.
+    Picked(Vec<u8>),
+    /// The user dismissed the dialog.
+    Cancelled,
+    /// The dialog or the file read failed.
+    Failed(String),
 }

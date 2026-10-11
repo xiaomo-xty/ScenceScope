@@ -32,7 +32,21 @@ M0 和 M1 已关闭。M1 的可复现证据包括：
 | M2-004 | P0 | 显示节点树、资源摘要和统计 | 用户可浏览节点、网格、材质、纹理及核心统计 | 待办 |
 | M2-005 | P0 | 分类加载错误并增加回归资产 | 损坏、空或不支持输入不崩溃；多个 Khronos 资产通过回归检查 | 待办 |
 
-M2-002 已完成：`parse_asset_document` 覆盖场景、节点、多个 mesh primitive、材质与纹理的转换；UV（`TEXCOORD_0`）、对象名称与 Base Color 纹理（内嵌 PNG/JPEG，经 `libjpeg-turbo-rs` 0.8 解码为 RGBA8）均已接入，材质到纹理的引用已闭环。除 Box 回归外，测试使用手写 GLB fixture（`build_glb`）覆盖可选属性缺失、UV 数量不匹配、内嵌 PNG/JPEG、RGB/灰度展开与外部纹理拒绝等路径。下一步进入 M2-003（Windows/Web 本地文件选择）。
+M2-002 已完成，转换侧与渲染输入侧均已落地。
+
+**转换侧**：`parse_asset_document` 覆盖场景、节点、多个 mesh primitive、材质与纹理的转换；UV（`TEXCOORD_0`）、对象名称与 Base Color 纹理（内嵌 PNG/JPEG，经 `libjpeg-turbo-rs` 0.8 解码为 RGBA8）均已接入，材质到纹理的引用已闭环。除 Box 回归外，测试使用手写 GLB fixture（`build_glb`）覆盖可选属性缺失、UV 数量不匹配、内嵌 PNG/JPEG、RGB/灰度展开与外部纹理拒绝等路径。
+
+**渲染输入侧**：`AssetDocument::mesh_instances` 按声明序深度优先遍历默认场景、用 `visited` 去重并组合 TRS 世界变换（Core 5 条单测覆盖根序、DFS 顺序、共享节点、变换组合与空文档）；Windows/Web 入口改为从 `AssetDocument` 派生实例后创建 GPU 状态。旧的 `parse_first_mesh_primitive`、拥有式 `MeshInstance` 与无调用者的 `set_mesh`/`ObjectBinding::update` 已删除，`glam` 从 glTF 适配器移除（世界变换数学归 Core）。遍历顺序是契约，由「两个根节点」等用例钉住。
+
+**证据**：21 个测试通过（Core 7 / glTF 10 / Render 4），`cargo release-check`、`cargo fmt --all --check` 与 wasm32 目标编译通过；桌面端画面与 M1 截图一致（迁移未改变像素）。决策记录见 [ADR-0003](adr/0003-asset-document-render-input.md)。
+
+下一步：M2-003（Windows/Web 本地文件选择）。渲染器目前只绘制第一个网格实例；运行时换资产需要重新设计文档所有权与 GPU 资源重建（此前为此准备的 `set_mesh` 因无调用者已删除，将按真实需求重写）。
+
+M2-003 的文件对话框选型已完成 spike 验证（2026-10-11，临时目录，未入库）：选用 `rfd` 0.17.2（MIT），两端统一走 `AsyncFileDialog::pick_file()` + `FileHandle::read()`——浏览器不支持路径、只返回字节，与架构边界的「文件以字节进入业务流程」一致。验证结论：
+
+- Windows 原生编译通过，依赖仅 `windows-sys` / `raw-window-handle` / `log`；实测弹出原生对话框，选中 `Box.glb` 返回 1664 字节且魔数为 `glTF`，取消返回 `None`。
+- `cargo check --target wasm32-unknown-unknown` 与 `wasm-pack build --target web --dev` 全链路通过；浏览器实测返回 1664 字节，取消返回 `None`。
+- 已知约束：wasm 侧 `#[wasm_bindgen]` 的 async fn 需要 crate 直接依赖 `wasm-bindgen-futures`（Web 入口已有）；浏览器要求文件选择由用户手势触发；`FileHandle::path()` 在浏览器不存在，只能用 `read()`。
 
 ## 3. 里程碑
 

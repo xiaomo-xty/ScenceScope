@@ -8,7 +8,7 @@
 
 ## 当前状态
 
-项目处于 **M2：从查看器到检查器**。M1 已完成固定 `Box.glb` 的解析、节点变换、Windows/Web 共享渲染、深度测试、背面剔除和轨道相机。当前任务是建立能够表达 v0.1 范围且不绑定第三方 glTF 类型的内部资产模型与统计。
+项目处于 **M2：从查看器到检查器**。M1 完成了固定 `Box.glb` 的解析、节点变换、Windows/Web 共享渲染、深度测试、背面剔除和轨道相机；M2-002 完成了内部 `AssetDocument`、多节点与多 primitive 遍历、UV 与内嵌 Base Color 纹理解码，并把 Windows/Web 的渲染输入统一切换到 `AssetDocument`。当前任务是接入本地文件选择（M2-003）。
 
 唯一执行状态记录在[项目路线图](docs/roadmap.md)中。
 
@@ -124,5 +124,6 @@ docs                      # 产品、路线图、架构、ADR 和调试记录
 - [架构设计](docs/architecture.md)
 - [ADR-0001：项目基线](docs/adr/0001-project-foundation.md)
 - [ADR-0002：跨平台颜色输出](docs/adr/0002-cross-platform-color-output.md)
+- [ADR-0003：资产文档作为唯一渲染输入](docs/adr/0003-asset-document-render-input.md)
 - [调试记录：Desktop/Web 色差](docs/debugging/0001-desktop-web-color-difference.md)
 - [glTF/GLB 格式布局图](docs/images/gltf-layout.svg)

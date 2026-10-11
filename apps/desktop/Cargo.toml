@@ -17,3 +17,4 @@ scenescope-core = { version = "0.1.0", path = "../../crates/scenescope-core" }
 scenescope-gltf = { version = "0.1.0", path = "../../crates/scenescope-gltf" }
 scenescope-render = { version = "0.1.0", path = "../../crates/scenescope-render" }
 winit = "0.30.13"
+rfd.workspace = true
