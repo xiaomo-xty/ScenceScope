@@ -5,12 +5,19 @@ use glam::{
     camera::rh::{proj::directx::perspective, view::look_at_mat4},
 };
 use wgpu::util::DeviceExt;
-use winit::dpi::PhysicalSize;
+use winit::{dpi::PhysicalSize, event::MouseScrollDelta};
 
 const PITCH_LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
 
 const MIN_DISTANCE: f32 = 0.1;
 const MAX_DISTANCE: f32 = 100.0;
+
+/// Pixels reported by one wheel notch when a platform delivers pixel deltas.
+///
+/// Browsers report `WheelEvent.deltaY` in pixels, where one notch is about 100,
+/// and high-resolution desktop wheels do the same. Line deltas are already
+/// expressed in notches and need no conversion.
+const PIXELS_PER_WHEEL_NOTCH: f32 = 100.0;
 
 #[derive(Debug)]
 pub(crate) struct OrbitCamera {
@@ -164,13 +171,44 @@ pub(crate) const fn aspect_ratio(size: PhysicalSize<u32>) -> f32 {
     size.width as f32 / size.height as f32
 }
 
+/// Converts a platform wheel event into the notches that zooming expects.
+///
+/// Desktop platforms report line deltas already expressed in notches, while
+/// browsers (and some high-resolution wheels) report pixel deltas of roughly 100
+/// per notch. Without this conversion a browser wheel zooms about 100 times as
+/// far per notch as a desktop one, which pins the camera to its distance limit
+/// after a single click.
+#[must_use]
+pub fn wheel_notches(delta: MouseScrollDelta) -> f32 {
+    match delta {
+        MouseScrollDelta::LineDelta(_, y) => y,
+        MouseScrollDelta::PixelDelta(position) => position.cast::<f32>().y / PIXELS_PER_WHEEL_NOTCH,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use glam::Vec3;
+    use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
+
+    use crate::wheel_notches;
 
     use super::{MAX_DISTANCE, MIN_DISTANCE, OrbitCamera, PITCH_LIMIT};
 
     const EPSILON: f32 = 1.0e-5;
+
+    #[test]
+    fn wheel_notches_treats_a_browser_notch_like_a_desktop_notch() {
+        // A browser reports one notch as 100 pixels; a desktop platform reports
+        // it as one line. Both must zoom by the same amount.
+        let browser_notch = MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, 100.0));
+        let desktop_notch = MouseScrollDelta::LineDelta(0.0, 1.0);
+
+        assert!(
+            (wheel_notches(browser_notch) - wheel_notches(desktop_notch)).abs() < EPSILON,
+            "one browser notch should zoom as far as one desktop notch",
+        );
+    }
 
     #[test]
     fn new_reproduces_initial_eye_position() {

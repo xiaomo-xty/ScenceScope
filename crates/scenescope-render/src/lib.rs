@@ -12,6 +12,7 @@ mod gpu;
 )]
 mod camera;
 
+pub use camera::wheel_notches;
 pub use gpu::GpuState;
 
 #[allow(

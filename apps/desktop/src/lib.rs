@@ -273,13 +273,8 @@ impl App {
     }
 
     fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta, window: &Window) {
-        let zoom_delta = match delta {
-            MouseScrollDelta::LineDelta(_, y) => y,
-            MouseScrollDelta::PixelDelta(position) => position.cast::<f32>().y,
-        };
-
         if let Some(gpu) = self.gpu.as_mut() {
-            gpu.zoom_camera(zoom_delta);
+            gpu.zoom_camera(scenescope_render::wheel_notches(delta));
             window.request_redraw();
         }
     }

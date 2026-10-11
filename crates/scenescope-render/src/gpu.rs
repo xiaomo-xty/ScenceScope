@@ -433,6 +433,10 @@ impl GpuState {
     ///
     /// The updated view-projection matrix is written to the camera
     /// uniform buffer immediately.
+    ///
+    /// `delta` is measured in wheel notches: convert platform wheel events with
+    /// [`wheel_notches`](crate::wheel_notches) instead of passing their raw
+    /// values, which differ between platforms.
     pub fn zoom_camera(&mut self, delta: f32) {
         self.camera.zoom(delta);
 
