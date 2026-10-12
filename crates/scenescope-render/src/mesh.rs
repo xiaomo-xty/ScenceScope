@@ -1,4 +1,4 @@
-//! GPU buffers for an uploaded mesh instance.
+//! GPU buffers for one uploaded mesh primitive.
 
 use anyhow::Context;
 use scenescope_core::{MeshData, MeshInstance};

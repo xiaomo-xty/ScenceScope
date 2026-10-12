@@ -113,16 +113,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let window = Arc::new(window);
 
                 let instances = self.document.mesh_instances();
-                // Temporary single-instance rendering: M2-004 renders every instance.
-                let Some(instance) = instances.first().copied() else {
-                    self.fatal_error = Some(anyhow::anyhow!(
-                        "asset contains no renderable mesh instances"
-                    ));
-                    event_loop.exit();
-                    return;
-                };
 
-                let gpu_result = pollster::block_on(GpuState::new(Arc::clone(&window), instance));
+                let gpu_result = pollster::block_on(GpuState::new(Arc::clone(&window), &instances));
 
                 match gpu_result {
                     Ok(gpu) => {
@@ -217,17 +209,17 @@ impl App {
         };
 
         let instances = document.mesh_instances();
-        let Some(instance) = instances.first().copied() else {
+        if instances.is_empty() {
             eprintln!("the picked asset contains no renderable mesh instance");
             return;
-        };
+        }
 
         let Some(gpu) = self.gpu.as_mut() else {
             eprintln!("GPU state is not initialized");
             return;
         };
 
-        if let Err(error) = gpu.set_mesh(instance) {
+        if let Err(error) = gpu.set_instances(&instances) {
             eprintln!("failed to upload the picked asset: {error}");
             return;
         }

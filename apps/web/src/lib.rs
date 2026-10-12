@@ -153,12 +153,12 @@ mod browser {
             };
 
             let instances = document.mesh_instances();
-            let Some(instance) = instances.first().copied() else {
-                web_sys::console::error_1(&JsValue::from_str(
+
+            if instances.is_empty() {
+                return web_sys::console::error_1(&JsValue::from_str(
                     "the picked asset contains no renderable mesh instance",
                 ));
-                return;
-            };
+            }
 
             let RendererState::Ready(gpu) = &mut self.renderer else {
                 return web_sys::console::error_1(&JsValue::from_str(
@@ -166,9 +166,9 @@ mod browser {
                 ));
             };
 
-            if let Err(error) = gpu.set_mesh(instance) {
+            if let Err(err) = gpu.set_instances(&instances) {
                 return web_sys::console::error_1(&js_error(&format!(
-                    "failed to upload the picked asset: {error}"
+                    "failed to upload the picked asset: {err}"
                 )));
             }
 
@@ -231,13 +231,8 @@ mod browser {
                 .map_err(|error| error.to_string())?;
 
         let instances = document.mesh_instances();
-        // Temporary single-instance rendering: M2-004 renders every instance.
-        let instance = instances
-            .first()
-            .copied()
-            .ok_or_else(|| "asset contains no renderable mesh instance".to_owned())?;
 
-        let gpu = GpuState::new(window, instance)
+        let gpu = GpuState::new(window, &instances)
             .await
             .map_err(|error| format!("{error:#}"))?;
 
