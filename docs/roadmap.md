@@ -60,13 +60,15 @@ M2-007 已完成（2026-10-11）：滚轮增量在 `wheel_notches` 中统一为�
 
 M2-004 已于 2026-10-11 启动，目标是"能用的检查器"：浏览节点树、资源摘要与统计，并与视口双向联动。本轮范围（估算粒度 2h）：
 
-- **前置——渲染正确性**：`MeshInstance` 增加 `node_index`/`mesh_index`/`primitive_index`（2h）；渲染器多实例绘制，按 mesh 去重几何、按实例提交世界变换，`GpuState::set_mesh` 改为 `set_instances`（6h）。渲染器目前只绘制第一个网格实例——`CesiumMilkTruck.glb` 有 2 个 mesh、4 个 primitive、5 个可达实例，因此只显示车身，多实例绘制是本轮要还的债。
+- **前置——渲染正确性**：`MeshInstance` 增加 `node_id`/`mesh_id`/`primitive_index`（2h）；渲染器多实例绘制，按 `(mesh, primitive)` 去重几何、按实例提交世界变换，`GpuState::set_mesh` 改为 `set_instances`（6h）。渲染器目前只绘制第一个网格实例——`CesiumMilkTruck.glb` 有 2 个 mesh、4 个 primitive、5 个可达实例，因此只显示车身，多实例绘制是本轮要还的债。
 - **界面接线**：`egui-winit` + `egui-wgpu` 集成进两个现有入口，按目标分别声明 features（wasm 需关掉依赖 `arboard` 的 `clipboard`），含输入门控（6h）。
 - **界面内容**：新 crate `scenescope-ui` 的视图模型（4h）与 egui 面板——资源摘要、节点树、网格、材质、纹理（10h）。
 - **联动**：选择状态 + 高亮 + 文本表达（第 8 节要求不能只靠颜色）+ 点击空白取消选中（6h）。
 - **决策记录**：ADR-0004（2h）。
 
 同一里程碑内的后续项按第 3 节排期执行：M2-005 错误分类与回归资产、M2-006 拖放、M2-008 双向拾取、M2-009 双语与字体、M2-010 材质可见、M2-011 PBR-lite。
+
+**进度**：实例身份已完成（2026-10-12，`9375199`）——`MeshInstance` 增加 `node_id`/`mesh_id`/`primitive_index`，几何字段更名为 `geometry`；Core 测试 9 条通过，其中两条分别钉住节点维度与 primitive 维度的索引来源，并用 `std::ptr::eq` 正反两向把 ADR-0003 的零拷贝从"好处"提升为契约。ADR-0003 的旧结构代码块保留原样，只加一行指向 ADR-0004 的说明。
 
 框架与分层决策见 [ADR-0004](adr/0004-gui-framework-and-ui-layering.md)。
 
