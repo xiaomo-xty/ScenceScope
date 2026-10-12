@@ -26,6 +26,8 @@ M2-001 与 M2-002 建立了 `AssetDocument`（场景、节点、多个 mesh prim
    }
    ```
 
+   （M2-004 起该结构扩展为带身份的版本：几何字段更名为 `geometry`，并增加 `node_id` / `mesh_id` / `primitive_index` 三个连接键，见 [ADR-0004](0004-gui-framework-and-ui-layering.md) 第 6 条。）
+
 3. **场景遍历与世界变换组合归 Core。** `AssetDocument::mesh_instances` 遍历默认场景，规则为：按场景声明序、深度优先、子节点按声明序；被多个父节点引用的节点只访问一次；局部变换按 glTF 的 `M = T * R * S` 组合后与父世界矩阵相乘。
 4. **遍历顺序是契约，不是实现细节。** 顺序决定"第一个实例是谁"，进而决定渲染结果与将来的诊断顺序，因此写入文档注释并由测试钉住。
 5. **Core 引入 `glam` 作为唯一数学依赖。** 该决策只改变 Core 的依赖清单，不改变边界含义：Core 仍不依赖 wgpu、winit、egui、浏览器 API、平台路径或第三方 glTF 类型。

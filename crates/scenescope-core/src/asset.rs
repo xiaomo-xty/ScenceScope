@@ -127,12 +127,17 @@ impl AssetDocument {
 
             let world = parent_world * local_transform(&node.transform);
 
-            if let Some(mesh) = node.mesh.and_then(|mesh_id| self.mesh(mesh_id)) {
-                for primitive in &mesh.primitives {
-                    instances.push(MeshInstance {
-                        mesh: &primitive.geometry,
-                        world_transform: world.to_cols_array_2d(),
-                    });
+            if let Some(mesh_id) = node.mesh {
+                if let Some(mesh) = self.mesh(mesh_id) {
+                    for (primitive_index, primitive) in mesh.primitives.iter().enumerate() {
+                        instances.push(MeshInstance {
+                            node_id,
+                            mesh_id,
+                            primitive_index,
+                            geometry: &primitive.geometry,
+                            world_transform: world.to_cols_array_2d(),
+                        });
+                    }
                 }
             }
 
@@ -444,20 +449,28 @@ mod tests {
         AssetDocument, Mesh, MeshId, MeshPrimitive, Node, NodeId, NodeTransform, Scene, SceneId,
     };
 
-    /// A single-primitive mesh whose vertex count identifies it in assertions.
-    fn mesh(vertex_count: usize) -> Mesh {
+    /// A mesh whose primitive vertex counts identify it in assertions.
+    fn mesh_with_primitives(vertex_counts: &[usize]) -> Mesh {
         Mesh {
             name: None,
-            primitives: vec![MeshPrimitive {
-                geometry: MeshData {
-                    positions: vec![[0.0; 3]; vertex_count],
-                    indices: vec![0, 1, 2],
-                    normals: None,
-                    uvs: None,
-                },
-                material: None,
-            }],
+            primitives: vertex_counts
+                .iter()
+                .map(|&vertex_count| MeshPrimitive {
+                    geometry: MeshData {
+                        positions: vec![[0.0; 3]; vertex_count],
+                        indices: vec![0, 1, 2],
+                        normals: None,
+                        uvs: None,
+                    },
+                    material: None,
+                })
+                .collect(),
         }
+    }
+
+    /// A single-primitive mesh whose vertex count identifies it in assertions.
+    fn mesh(vertex_count: usize) -> Mesh {
+        mesh_with_primitives(&[vertex_count])
     }
 
     fn node(children: &[usize], mesh: Option<usize>, translation: [f32; 3]) -> Node {
@@ -498,8 +511,8 @@ mod tests {
         let instances = asset.mesh_instances();
 
         assert_eq!(instances.len(), 2);
-        assert_eq!(instances[0].mesh.positions.len(), 3, "first root wins");
-        assert_eq!(instances[1].mesh.positions.len(), 6);
+        assert_eq!(instances[0].geometry.positions.len(), 3, "first root wins");
+        assert_eq!(instances[1].geometry.positions.len(), 6);
     }
 
     #[test]
@@ -520,11 +533,11 @@ mod tests {
 
         assert_eq!(instances.len(), 2);
         assert_eq!(
-            instances[0].mesh.positions.len(),
+            instances[0].geometry.positions.len(),
             3,
             "the grandchild is reached before sibling 2"
         );
-        assert_eq!(instances[1].mesh.positions.len(), 6);
+        assert_eq!(instances[1].geometry.positions.len(), 6);
     }
 
     #[test]
@@ -571,5 +584,68 @@ mod tests {
         document.default_scene = None;
 
         assert!(document.mesh_instances().is_empty());
+    }
+
+    /// ```text
+    /// 场景 roots = [node0, node1]
+    /// node0 ──mesh──▶ meshes[0]（1 个 primitive，3 顶点）  translation (0,0,0)
+    /// node1 ──mesh──▶ meshes[0]（同一个 mesh！）           translation (1,0,0)
+    /// ```
+    #[test]
+    fn instances_of_one_mesh_share_its_id_but_not_their_node() {
+        let document = document(
+            vec![
+                node(&[], Some(0), [0.0, 0.0, 0.0]),
+                node(&[], Some(0), [1.0, 0.0, 0.0]),
+            ],
+            vec![NodeId::from_index(0), NodeId::from_index(1)],
+            vec![mesh(3)],
+        );
+
+        let instances = document.mesh_instances();
+
+        assert_eq!(instances.len(), 2);
+        assert_eq!(
+            instances[0].mesh_id, instances[1].mesh_id,
+            "both nodes reference meshes[0]"
+        );
+        // Zero-copy is a contract from ADR-0003: instances of one primitive
+        // borrow the same geometry instead of copying it.
+        assert!(
+            std::ptr::eq(instances[0].geometry, instances[1].geometry),
+            "instances of one primitive must share one geometry",
+        );
+        assert_eq!(instances[0].primitive_index, 0);
+        assert_eq!(
+            instances[1].primitive_index, 0,
+            "primitive index counts within its mesh"
+        );
+        assert_ne!(
+            instances[0].node_id, instances[1].node_id,
+            "each node is its own source"
+        );
+    }
+
+    #[test]
+    fn primitive_index_counts_within_a_mesh() {
+        let document = document(
+            vec![node(&[], Some(0), [0.0, 0.0, 0.0])],
+            vec![NodeId::from_index(0)],
+            vec![mesh_with_primitives(&[3, 6, 9])],
+        );
+
+        let instances = document.mesh_instances();
+
+        assert_eq!(instances.len(), 3);
+        for (expected_index, instance) in instances.iter().enumerate() {
+            assert_eq!(instance.primitive_index, expected_index);
+            assert_eq!(instance.node_id, NodeId::from_index(0));
+            assert_eq!(instance.mesh_id, MeshId::from_index(0));
+            assert_eq!(instance.geometry.positions.len(), [3, 6, 9][expected_index]);
+        }
+        assert!(
+            !std::ptr::eq(instances[0].geometry, instances[1].geometry),
+            "each primitive owns its own geometry",
+        );
     }
 }
