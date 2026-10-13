@@ -35,7 +35,7 @@ wasm-pack build apps/web --target web --dev
 python -m http.server 8080 --directory apps/web
 ```
 
-然后访问 <http://127.0.0.1:8080/>。Web 端与桌面端使用同一份 `MeshInstance`、渲染器和相机逻辑；点击画布后用 **O** 打开浏览器文件选择器。
+然后访问 [http://127.0.0.1:8080/](http://127.0.0.1:8080/)。Web 端与桌面端使用同一份 `MeshInstance`、渲染器和相机逻辑；点击画布后用 **O** 打开浏览器文件选择器。
 
 ## 当前能力
 
@@ -45,6 +45,7 @@ python -m http.server 8080 --directory apps/web
 - 解析失败返回分类错误：非 GLB、外部 buffer/纹理、属性数量不匹配、不支持的图像格式等。
 - 使用共享 `wgpu` 渲染器在 Windows 与 Web 中显示资产；启动加载内嵌 `Box.glb`，按 **O** 可通过文件对话框打开本地 `.glb`。
 - 运行时换资产：成功则替换几何与世界变换并保留相机视角；解析或上传失败、以及取消选择时，当前画面保持不变且不产生误导性诊断。
+- 绘制默认场景的全部网格实例，几何按 `(mesh, primitive)` 去重后共享，世界变换按实例绑定。
 - 支持深度测试、背面剔除、Lambert 漫反射、轨道相机和滚轮缩放；滚轮增量在两端按同一单位归一化（浏览器上报的像素级增量折算为「格」）。
 - 使用 sRGB Surface View 保持桌面端与 Web 端的颜色输出语义一致。
 - 自动化测试覆盖 Box 回归（24 顶点、36 索引、法线、世界变换）和手写 GLB fixture（可选属性缺失、UV 数量不匹配、内嵌 PNG/JPEG 解码、外部纹理拒绝）。
@@ -105,8 +106,7 @@ docs                      # 产品、路线图、架构、ADR 和调试记录
 ## 当前限制
 
 - 尚未支持文件拖放（见 Backlog M2-006），每次打开本地文件需要通过 O 键重新选择。
-- 渲染器目前只绘制 `mesh_instances()` 返回的第一个实例；其余节点、mesh primitive、材质与纹理已解析并计入统计，但未绘制（见 M2-004）。
-- 渲染器尚未消费 UV 和 Base Color 纹理；材质信息目前只用于解析与统计。
+- 渲染器尚未消费 UV 与 Base Color 纹理；材质信息目前只用于解析与统计（见 M2-010）。
 - 尚无场景摘要 UI、资产统计界面、检查规则、CLI 或 JSON 报告。
 - 不支持动画、蒙皮、Morph Target、Draco、KTX2、外部 buffer；纹理仅接受 BIN 内嵌的 PNG/JPEG。
 - 当前只验证了 Windows 桌面端和浏览器中的 WebAssembly 构建与运行，不能据此声称其他平台已受支持。
