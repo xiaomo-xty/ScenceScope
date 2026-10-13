@@ -356,13 +356,10 @@ impl GpuState {
 
                 render_pass.set_bind_group(0, self.camera_binding.bind_group(), &[]);
 
-                // Temporary single-instance rendering: M2-004 draws every pair,
-                // so this loop only needs its `.take(1)` removed.
                 for (binding, &geometry_index) in self
                     .instance_bindings
                     .iter()
                     .zip(&self.geometry_of_instance)
-                    .take(1)
                 {
                     let Some(geometry) = self.geometry.get(geometry_index) else {
                         continue;
