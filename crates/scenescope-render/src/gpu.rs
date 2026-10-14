@@ -216,7 +216,7 @@ impl GpuState {
         let camera_binding = CameraBinding::new(&device, &camera);
 
         let object_layout = create_object_layout(&device);
-        let draws = create_gpu_instances(&device, &object_layout, instances)?;
+        let instances = create_gpu_instances(&device, &object_layout, instances)?;
 
         let render_pipeline = create_render_pipeline(
             &device,
@@ -239,7 +239,7 @@ impl GpuState {
             surface_view_format,
             render_pipeline,
             object_layout,
-            instances: draws,
+            instances,
             camera,
             camera_binding,
             depth_view,
@@ -532,12 +532,12 @@ fn create_instance_binding(
 fn create_gpu_instances(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-    instances: &[MeshInstance<'_>],
+    mesh_instances: &[MeshInstance<'_>],
 ) -> anyhow::Result<Vec<GpuInstance>> {
     let mut uploaded: HashMap<(MeshId, usize), Rc<MeshBuffers>> = HashMap::new();
-    let mut draws = Vec::with_capacity(instances.len());
+    let mut gpu_instances = Vec::with_capacity(mesh_instances.len());
 
-    for instance in instances {
+    for instance in mesh_instances {
         let key = (instance.mesh_id, instance.primitive_index);
 
         let geometry = match uploaded.entry(key) {
@@ -548,7 +548,7 @@ fn create_gpu_instances(
         };
 
         let binding = create_instance_binding(device, layout, &instance.world_transform)?;
-        draws.push(GpuInstance { geometry, binding });
+        gpu_instances.push(GpuInstance { geometry, binding });
     }
-    Ok(draws)
+    Ok(gpu_instances)
 }
